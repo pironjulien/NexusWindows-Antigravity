@@ -102,7 +102,7 @@ pwsh -NoProfile -File client/spotlight_launcher.ps1
 
 ### 4. Lancer le Serveur MCP
 ```bash
-python client/mcp_server.py
+python client/mcp_server.py --server computer
 ```
 
 ### 5. Lancer les Tests Unitaires

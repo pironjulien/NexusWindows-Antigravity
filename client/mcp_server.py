@@ -22,10 +22,34 @@ except ImportError:
     from bridge_client import call_bridge
 
 
-mcp = FastMCP(
+browser_mcp = FastMCP(
+    name="nexus-browser",
+    instructions="Native Chrome browser automation bridge controlling tabs, CDP, Set-of-Marks, Playwright selectors, and Side Panel.",
+)
+
+computer_mcp = FastMCP(
+    name="nexus-computer",
+    instructions="SOTA Windows OS Computer Use & Spotlight Companion bridge (UI Automation 3.0, Set-of-Marks, SendInput, Spotlight launcher).",
+)
+
+combined_mcp = FastMCP(
     name="nexus-browser",
     instructions="Native browser & Windows desktop automation bridge controlling Chrome tabs, CDP, Set-of-Mark, Playwright selectors, and OS-level Computer Use.",
 )
+
+mcp = combined_mcp
+
+
+def _register_browser_tool(func: Any) -> Any:
+    browser_mcp.add_tool(func)
+    combined_mcp.add_tool(func)
+    return func
+
+
+def _register_computer_tool(func: Any) -> Any:
+    computer_mcp.add_tool(func)
+    combined_mcp.add_tool(func)
+    return func
 
 
 def _call_bridge(action: str, params: dict | None = None, timeout: float = 20.0) -> str:
@@ -56,55 +80,92 @@ def _call_bridge(action: str, params: dict | None = None, timeout: float = 20.0)
         return json.dumps({"status": "error", "error": str(error)}, ensure_ascii=False)
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_list_tabs() -> str:
     """Liste tous les onglets ouverts dans Google Chrome avec leurs identifiants, titres et URLs."""
     return _call_bridge("list-tabs")
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_active_tab() -> str:
     """Récupère les métadonnées de l'onglet actuellement actif dans Google Chrome."""
     return _call_bridge("active-tab")
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_select_tab(tab_id: int) -> str:
     """Active et met au premier plan l'onglet spécifié par son ID."""
     return _call_bridge("select-tab", {"tab_id": tab_id})
 
 
-@mcp.tool()
-def browser_new_tab(url: str | None = None) -> str:
-    """Ouvre un nouvel onglet dans Google Chrome vers l'URL spécifiée (ou about:blank)."""
-    return _call_bridge("create-tab", {"url": url or "about:blank"})
+@_register_browser_tool
+def browser_new_tab(
+    url: str | None = None,
+    background: bool = True,
+    group: str | None = "Antigravity",
+) -> str:
+    """Ouvre un nouvel onglet dans Google Chrome vers l'URL spécifiée (ou about:blank).
+
+    Par défaut, s'ouvre en arrière-plan (background=True) sans voler le focus de l'utilisateur,
+    et s'associe automatiquement au groupe d'onglets dédié 'Antigravity'.
+    """
+    params: dict = {
+        "url": url or "about:blank",
+        "background": background,
+        "active": not background,
+    }
+    if group:
+        params["group"] = group
+    return _call_bridge("create-tab", params)
 
 
-@mcp.tool()
+@_register_browser_tool
+def browser_group_tabs(
+    tab_ids: list[int] | None = None,
+    title: str = "Antigravity",
+    color: str = "purple",
+    collapsed: bool = False,
+) -> str:
+    """Regroupe un ou plusieurs onglets Chrome dans un groupe d'onglets nommé et coloré.
+
+    Permet d'isoler visuellement les onglets de travail de l'agent sans encombrer les onglets de l'utilisateur.
+    Couleurs supportées : 'grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'.
+    """
+    params: dict = {
+        "title": title,
+        "color": color,
+        "collapsed": collapsed,
+    }
+    if tab_ids:
+        params["tabIds"] = tab_ids
+    return _call_bridge("group-tabs", params)
+
+
+@_register_browser_tool
 def browser_close_tab(tab_id: int | None = None) -> str:
     """Ferme l'onglet spécifié par son ID (ou l'onglet actif)."""
     return _call_bridge("close-tab", {"tab_id": tab_id})
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_reload(tab_id: int | None = None, bypass_cache: bool = False) -> str:
     """Recharge la page de l'onglet actif ou cible."""
     return _call_bridge("reload", {"tab_id": tab_id, "bypassCache": bypass_cache})
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_navigate(url: str, tab_id: int | None = None) -> str:
     """Navigue vers l'URL spécifiée dans l'onglet actif ou cible."""
     return _call_bridge("navigate", {"url": url, "tab_id": tab_id})
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_wait_load(timeout_ms: int = 10000, tab_id: int | None = None) -> str:
     """Attend la stabilisation et l'état complet du document (document.readyState === 'complete')."""
     return _call_bridge("wait-load", {"timeout": timeout_ms, "tab_id": tab_id})
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_hover(
     selector: str | None = None,
     text: str | None = None,
@@ -130,7 +191,7 @@ def browser_hover(
     return _call_bridge("hover", params)
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_click(
     selector: str | None = None,
     text: str | None = None,
@@ -158,13 +219,13 @@ def browser_click(
     return _call_bridge("click", params)
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_semantic_click(role: str, name: str | None = None, tab_id: int | None = None) -> str:
     """Clique sur un élément de façon robuste style Playwright via son rôle ARIA (button, link, tab) et son nom accessible."""
     return _call_bridge("semantic-click", {"role": role, "name": name, "tab_id": tab_id})
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_fill(
     selector: str | None = None,
     value: str = "",
@@ -189,13 +250,13 @@ def browser_fill(
     return _call_bridge("fill", params)
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_semantic_fill(label: str, value: str, tab_id: int | None = None) -> str:
     """Remplit un champ de formulaire de façon robuste style Playwright ciblé par son étiquette (label) ou son placeholder."""
     return _call_bridge("semantic-fill", {"label": label, "value": value, "tab_id": tab_id})
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_select_option(
     selector: str, text: str | None = None, value: str | None = None, tab_id: int | None = None
 ) -> str:
@@ -203,19 +264,19 @@ def browser_select_option(
     return _call_bridge("select-option", {"selector": selector, "text": text, "value": value, "tab_id": tab_id})
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_press_key(key: str, tab_id: int | None = None) -> str:
     """Presse une touche spéciale via CDP (Enter, Escape, Tab, Backspace, ArrowDown, ArrowUp)."""
     return _call_bridge("press-key", {"key": key, "tab_id": tab_id})
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_upload(files: list[str], selector: str | None = None, tab_id: int | None = None) -> str:
     """Téléverse un ou plusieurs fichiers (ex: .aab, .apk, .zip) sans ouvrir ni bloquer sur la boîte de dialogue native Windows."""
     return _call_bridge("upload", {"files": files, "selector": selector, "tab_id": tab_id})
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_vision_inspect(output_path: str | None = None, tab_id: int | None = None) -> str:
     """Injecte des badges néon Set-of-Mark (SoM) et capture la vue pour analyse spatiale multimodale.
 
@@ -226,37 +287,37 @@ def browser_vision_inspect(output_path: str | None = None, tab_id: int | None = 
     return _call_bridge("vision-inspect", {"output": output_path, "tab_id": tab_id})
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_click_mark(mark: int, tab_id: int | None = None) -> str:
     """Clique au centre géométrique exact du badge Set-of-Mark (SoM) identifié par la vision Gemini."""
     return _call_bridge("click-mark", {"mark": mark, "tab_id": tab_id})
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_check_handoff(tab_id: int | None = None) -> str:
     """Détecte proactivement la présence d'un écran 2FA (SMS, Google Authenticator), CAPTCHA ou Cloudflare Turnstile."""
     return _call_bridge("check-handoff", {"tab_id": tab_id})
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_content(mode: str = "interactive", tab_id: int | None = None) -> str:
     """Extrait le contenu de la page web. Modes disponibles : interactive (éléments cliquables/inputs), text (texte brut), html (DOM)."""
     return _call_bridge("content", {"mode": mode, "tab_id": tab_id})
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_axtree(tab_id: int | None = None) -> str:
     """Extrait l'arbre d'accessibilité sémantique complet (AXTree) de la page via CDP."""
     return _call_bridge("axtree", {"tab_id": tab_id})
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_logs(tab_id: int | None = None) -> str:
     """Récupère le flux d'erreurs et messages de la console DevTools de l'onglet actif."""
     return _call_bridge("logs", {"tab_id": tab_id})
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_screenshot(
     output_path: str | None = None,
     selector: str | None = None,
@@ -279,25 +340,25 @@ def browser_screenshot(
     return _call_bridge("screenshot", params)
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_pdf(output_path: str, tab_id: int | None = None) -> str:
     """Génère un export PDF vectoriel A4 haute fidélité de la page active."""
     return _call_bridge("pdf", {"output": output_path, "tab_id": tab_id})
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_eval(script: str, tab_id: int | None = None) -> str:
     """Exécute une expression JavaScript dans le contexte de la page web et renvoie le résultat."""
     return _call_bridge("eval", {"script": script, "tab_id": tab_id})
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_scroll(direction: str = "down", y: int = 400, tab_id: int | None = None) -> str:
     """Fait défiler la page web de y pixels vers le bas (down) ou le haut (up)."""
     return _call_bridge("scroll", {"direction": direction, "y": y, "tab_id": tab_id})
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_wait_network_idle(idle_ms: int = 300, timeout_ms: int = 8000, tab_id: int | None = None) -> str:
     """Attend la stabilisation des flux réseau (0 requête Fetch/XHR active pendant idle_ms).
 
@@ -307,7 +368,7 @@ def browser_wait_network_idle(idle_ms: int = 300, timeout_ms: int = 8000, tab_id
     return _call_bridge("wait-network-idle", {"idleMs": idle_ms, "timeoutMs": timeout_ms, "tab_id": tab_id})
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_get_cookies(urls: list[str] | None = None, tab_id: int | None = None) -> str:
     """Récupère les cookies de session et de domaine réels via CDP Network.getCookies pour réutilisation API."""
     params: dict = {"tab_id": tab_id}
@@ -316,13 +377,13 @@ def browser_get_cookies(urls: list[str] | None = None, tab_id: int | None = None
     return _call_bridge("get-cookies", params)
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_cdp_send(method: str, params: dict | None = None, tab_id: int | None = None) -> str:
     """Exécute une commande brute du Chrome DevTools Protocol (CDP) sur l'onglet spécifié."""
     return _call_bridge("cdp-send", {"method": method, "commandParams": params or {}, "tab_id": tab_id})
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_interactive_map(viewport_only: bool = True, max_elements: int = 60, tab_id: int | None = None) -> str:
     """Extrait une carte condensée SOTA des éléments interactifs visibles ([#1] bouton, [#2] input...).
 
@@ -336,7 +397,7 @@ def browser_interactive_map(viewport_only: bool = True, max_elements: int = 60, 
     )
 
 
-@mcp.tool()
+@_register_browser_tool
 def browser_drag_and_drop(
     from_selector: str | None = None,
     to_selector: str | None = None,
@@ -374,19 +435,19 @@ def _format_computer_result(func: Any, *args: Any, **kwargs: Any) -> str:
         return json.dumps({"status": "error", "error": str(error)}, ensure_ascii=False)
 
 
-@mcp.tool()
+@_register_computer_tool
 def computer_list_windows(visible_only: bool = True) -> str:
     """Liste toutes les fenêtres ouvertes du bureau Windows avec HWND, titre, PID, nom du processus exécutable, coordonnées et état actif/arrière-plan."""
     return _format_computer_result(computer_client.list_windows, visible_only=visible_only)
 
 
-@mcp.tool()
+@_register_computer_tool
 def computer_list_apps() -> str:
     """Liste les applications graphiques en cours d'exécution groupées par processus (ex. Chrome, Bloc-notes, VS Code, Explorer)."""
     return _format_computer_result(computer_client.list_apps)
 
 
-@mcp.tool()
+@_register_computer_tool
 def computer_focus_window(
     hwnd: int | None = None,
     title: str | None = None,
@@ -396,7 +457,7 @@ def computer_focus_window(
     return _format_computer_result(computer_client.focus_window, hwnd=hwnd, title=title, process_name=process_name)
 
 
-@mcp.tool()
+@_register_computer_tool
 def computer_get_window_state(
     hwnd: int | None = None,
     max_elements: int = 50,
@@ -417,7 +478,7 @@ def computer_get_window_state(
     )
 
 
-@mcp.tool()
+@_register_computer_tool
 def computer_click(
     hwnd: int | None = None,
     element_index: int | None = None,
@@ -440,7 +501,7 @@ def computer_click(
     )
 
 
-@mcp.tool()
+@_register_computer_tool
 def computer_type_text(
     text: str,
     hwnd: int | None = None,
@@ -460,7 +521,7 @@ def computer_type_text(
     )
 
 
-@mcp.tool()
+@_register_computer_tool
 def computer_press_key(keys: str, hwnd: int | None = None) -> str:
     """Presse une touche ou une combinaison de touches système (raccourcis clavier).
     Exemples : 'enter', 'tab', 'escape', 'backspace', 'ctrl+c', 'ctrl+v', 'alt+tab', 'alt+f4', 'win+r', 'ctrl+shift+p'.
@@ -468,7 +529,7 @@ def computer_press_key(keys: str, hwnd: int | None = None) -> str:
     return _format_computer_result(computer_client.press_key, keys=keys, hwnd=hwnd)
 
 
-@mcp.tool()
+@_register_computer_tool
 def computer_scroll(
     delta_y: int = 0,
     delta_x: int = 0,
@@ -487,7 +548,7 @@ def computer_scroll(
     )
 
 
-@mcp.tool()
+@_register_computer_tool
 def computer_drag(
     from_x: int,
     from_y: int,
@@ -510,7 +571,7 @@ def computer_drag(
     )
 
 
-@mcp.tool()
+@_register_computer_tool
 def computer_take_screenshot(
     hwnd: int | None = None,
     full_screen: bool = False,
@@ -535,7 +596,7 @@ def computer_take_screenshot(
     return _format_computer_result(_action)
 
 
-@mcp.tool()
+@_register_computer_tool
 def computer_spotlight_status() -> str:
     """Vérifie si le compagnon de bureau Antigravity Spotlight (Alt + Espace) et l'icône de zone de notification sont actifs."""
     running = spotlight_launcher.is_spotlight_running()
@@ -551,7 +612,7 @@ def computer_spotlight_status() -> str:
     )
 
 
-@mcp.tool()
+@_register_computer_tool
 def computer_spotlight_toggle(action: str = "start") -> str:
     """Démarre ou arrête le compagnon de bureau Antigravity Spotlight (Alt + Espace).
     action: 'start' pour démarrer en arrière-plan, 'stop' pour arrêter.
@@ -571,4 +632,20 @@ def computer_spotlight_toggle(action: str = "start") -> str:
 
 
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    import argparse
+
+    parser = argparse.ArgumentParser(description="NexusAGY Model Context Protocol Server")
+    parser.add_argument(
+        "--server",
+        choices=["browser", "computer", "all"],
+        default="all",
+        help="Target MCP server scope: browser (31 tools), computer (12 tools), or all (43 tools)",
+    )
+    args = parser.parse_args()
+
+    if args.server == "browser":
+        browser_mcp.run(transport="stdio")
+    elif args.server == "computer":
+        computer_mcp.run(transport="stdio")
+    else:
+        combined_mcp.run(transport="stdio")

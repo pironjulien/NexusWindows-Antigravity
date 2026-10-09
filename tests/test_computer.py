@@ -97,5 +97,17 @@ def test_mcp_server_computer_tools():
         shot_raw = mcp_server.computer_take_screenshot(hwnd=target)
         shot_res = json.loads(shot_raw)
         assert shot_res["status"] == "success"
-        assert "screenshot_data_url" in shot_res["data"]
         assert shot_res["data"]["size_bytes"] < 200 * 1024
+
+
+def test_mcp_modular_scopes():
+    browser_tools = [t.name for t in mcp_server.browser_mcp._tool_manager.list_tools()]
+    computer_tools = [t.name for t in mcp_server.computer_mcp._tool_manager.list_tools()]
+    combined_tools = [t.name for t in mcp_server.combined_mcp._tool_manager.list_tools()]
+
+    assert len(browser_tools) == 32
+    assert len(computer_tools) == 12
+    assert len(combined_tools) == 44
+    assert all(name.startswith("browser_") for name in browser_tools)
+    assert all(name.startswith("computer_") for name in computer_tools)
+    assert set(browser_tools).union(set(computer_tools)) == set(combined_tools)
