@@ -450,6 +450,7 @@ class Frame:
 
 
 def current_frame(hwnd: int) -> Frame:
+    ensure_default_desktop()
     v_left, v_top, v_right, v_bottom = virtual_screen()
     if hwnd == SCREEN:
         return Frame.fit(SCREEN, v_left, v_top, v_right - v_left, v_bottom - v_top)

@@ -272,7 +272,7 @@ def computer_press_key(
     combos = keys.split()
     if not combos:
         raise ComputerError("No keys specified.")
-    min(max(1, repeat), 50)
+    repeat = min(max(1, repeat), 50)
     for combo in combos:
         engine.parse_combo(combo)
     target = engine.resolve_target(hwnd)
@@ -302,6 +302,7 @@ def computer_scroll(
     settle_ms: int = 400,
 ) -> Content:
     """Scrolls a container in the background via UI Automation or via physical wheel."""
+    amount = min(max(1, amount), 50)
     target = engine.resolve_target(hwnd)
     if element_index is not None:
         try:
