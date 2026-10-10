@@ -4,6 +4,21 @@ Toutes les modifications notables apportées au projet **Antigravity Computer Us
 
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/), et ce projet adhère au versioning sémantique.
 
+## [2.2.0] - 2026-10-10
+
+### Ajouté
+- **Capture en Arrière-Plan Hors-Écran (*Background Offscreen GDI*) (`client/computer_client.py`)** :
+  - Intégration de l'API Win32 `PrintWindow(PW_RENDERFULLCONTENT)` avec prototypes 64-bit fiabilisés dans `capture_window_image()`. Permet de capturer le rendu exact d'une fenêtre cible en mémoire même lorsqu'elle est masquée ou recouverte, sans jamais la mettre au premier plan ni risquer de capturer l'écran de travail de Julien.
+- **Patterns UI Automation Étendus en Arrière-Plan (`client/computer_client.py`)** :
+  - `TogglePattern` : bascule et vérification immédiate de l'état des cases à cocher et switchs sans curseur physique.
+  - `SelectionItemPattern` : sélection directe des onglets, lignes de listes et boutons radio en arrière-plan.
+  - `ExpandCollapsePattern` : ouverture et fermeture programmatique des menus déroulants et arbres.
+  - `ScrollPattern` : défilement vertical et horizontal de conteneurs (`computer_scroll(element_index=...)`) directement en mémoire sans actionner la molette physique de la souris.
+- **Restauration Automatique du Premier Plan (*Auto-Restore Foreground*) (`client/computer_client.py`)** :
+  - Fonction `restore_foreground()` rétablissant instantanément le focus sur la fenêtre active de l'utilisateur si une application tierce (ex. WinForms, modales) s'active d'elle-même lors d'une action UIA.
+- **Garde-Fou Matériel de Sécurité (*Foreground Protection Guard*) (`client/computer_client.py`, `client/mcp_server.py`)** :
+  - Paramètre `foreground: bool = False` ajouté à `computer_click`, `computer_type_text`, `computer_press_key`, `computer_scroll`, `computer_mouse_move` et `computer_drag` : refus formel d'envoyer des événements physiques avec la souris ou le clavier si la fenêtre cible n'est pas active, garantissant à 100% que l'utilisateur n'est jamais interrompu pendant son travail sans accord explicite.
+
 ## [2.1.0] - 2026-10-10
 
 ### Corrigé

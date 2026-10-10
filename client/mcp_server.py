@@ -492,9 +492,10 @@ def computer_click(
     y: int | None = None,
     button: str = "left",
     click_count: int = 1,
+    foreground: bool = False,
 ) -> str:
-    """Clique sur un élément de l'interface par son index [#N] extrait via computer_get_window_state, ou sur des coordonnées relatives (x, y) dans la fenêtre.
-    Supporte 'left', 'right', 'middle' et double-clic (click_count=2).
+    """Clique sur un élément de l'interface par son index [#N] (en arrière-plan via UI Automation pour boutons, cases à cocher, onglets, menus) ou sur des coordonnées relatives (x, y).
+    Supporte 'left', 'right', 'middle' et double-clic (click_count=2). Les actions physiques avec la souris exigent foreground=True.
     """
     return _format_computer_result(
         computer_client.click,
@@ -504,6 +505,7 @@ def computer_click(
         y=y,
         button=button,
         click_count=click_count,
+        foreground=foreground,
     )
 
 
@@ -515,9 +517,10 @@ def computer_mouse_move(
     smooth: bool = True,
     steps: int = 10,
     duration_ms: int = 200,
+    foreground: bool = False,
 ) -> str:
     """Déplace le curseur de la souris vers des coordonnées (x, y) relatives à la fenêtre ou absolues à l'écran.
-    Supporte le déplacement fluide ease-in-out (smooth=True) pour survoler des éléments sans téléportation brutale.
+    Supporte le déplacement fluide ease-in-out (smooth=True). Exige foreground=True pour confirmer le pilotage physique du curseur.
     """
     return _format_computer_result(
         computer_client.mouse_move,
@@ -527,6 +530,7 @@ def computer_mouse_move(
         smooth=smooth,
         steps=steps,
         duration_ms=duration_ms,
+        foreground=foreground,
     )
 
 
@@ -536,10 +540,11 @@ def computer_type_text(
     hwnd: int | None = None,
     element_index: int | None = None,
     clear_first: bool = False,
+    foreground: bool = False,
 ) -> str:
-    """Saisit du texte au clavier dans la fenêtre ou l'élément ciblé.
-    Gère nativement l'Unicode et tous les caractères spéciaux (accents, emojis, ponctuation) indépendamment de la disposition du clavier physique.
-    Si element_index est fourni, peut assigner la valeur directement via UI Automation ValuePattern.
+    """Saisit du texte dans la fenêtre ou l'élément ciblé.
+    Si element_index est fourni, remplace la valeur directement en arrière-plan via UI Automation ValuePattern sans voler le focus ni toucher au clavier.
+    La saisie matérielle au clavier SendInput exige foreground=True.
     """
     return _format_computer_result(
         computer_client.type_text,
@@ -547,15 +552,17 @@ def computer_type_text(
         hwnd=hwnd,
         element_index=element_index,
         clear_first=clear_first,
+        foreground=foreground,
     )
 
 
 @_register_computer_tool
-def computer_press_key(keys: str, hwnd: int | None = None) -> str:
+def computer_press_key(keys: str, hwnd: int | None = None, foreground: bool = False) -> str:
     """Presse une touche ou une combinaison de touches système (raccourcis clavier).
     Exemples : 'enter', 'tab', 'escape', 'backspace', 'ctrl+c', 'ctrl+v', 'alt+tab', 'alt+f4', 'win+r', 'ctrl+shift+p'.
+    Exige foreground=True pour confirmer la frappe matérielle sur la fenêtre cible.
     """
-    return _format_computer_result(computer_client.press_key, keys=keys, hwnd=hwnd)
+    return _format_computer_result(computer_client.press_key, keys=keys, hwnd=hwnd, foreground=foreground)
 
 
 @_register_computer_tool
@@ -565,8 +572,12 @@ def computer_scroll(
     hwnd: int | None = None,
     x: int | None = None,
     y: int | None = None,
+    element_index: int | None = None,
+    foreground: bool = False,
 ) -> str:
-    """Fait défiler la molette de la souris verticalement (delta_y > 0 = haut, delta_y < 0 = bas) ou horizontalement (delta_x)."""
+    """Fait défiler un conteneur en arrière-plan (UI Automation ScrollPattern si element_index fourni) ou la molette de la souris (delta_y > 0 = haut, delta_y < 0 = bas).
+    Le défilement par molette physique exige foreground=True.
+    """
     return _format_computer_result(
         computer_client.scroll,
         delta_y=delta_y,
@@ -574,6 +585,8 @@ def computer_scroll(
         hwnd=hwnd,
         x=x,
         y=y,
+        element_index=element_index,
+        foreground=foreground,
     )
 
 
@@ -586,8 +599,9 @@ def computer_drag(
     hwnd: int | None = None,
     steps: int = 12,
     delay_ms: int = 15,
+    foreground: bool = False,
 ) -> str:
-    """Effectue un glisser-déposer fluide à la souris entre deux coordonnées relatives dans la fenêtre."""
+    """Effectue un glisser-déposer fluide à la souris entre deux coordonnées relatives dans la fenêtre. Exige foreground=True."""
     return _format_computer_result(
         computer_client.drag,
         from_x=from_x,
@@ -597,6 +611,7 @@ def computer_drag(
         hwnd=hwnd,
         steps=steps,
         delay_ms=delay_ms,
+        foreground=foreground,
     )
 
 

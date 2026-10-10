@@ -19,6 +19,36 @@ from typing import Any
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
 dwmapi = ctypes.windll.dwmapi
+gdi32 = ctypes.windll.gdi32
+
+HWND = wintypes.HWND
+HDC = wintypes.HDC
+HBITMAP = wintypes.HBITMAP
+HGDIOBJ = wintypes.HGDIOBJ
+BOOL = wintypes.BOOL
+UINT = wintypes.UINT
+
+user32.PrintWindow.argtypes = [HWND, HDC, UINT]
+user32.PrintWindow.restype = BOOL
+user32.GetDC.argtypes = [HWND]
+user32.GetDC.restype = HDC
+user32.ReleaseDC.argtypes = [HWND, HDC]
+user32.ReleaseDC.restype = ctypes.c_int
+
+gdi32.CreateCompatibleDC.argtypes = [HDC]
+gdi32.CreateCompatibleDC.restype = HDC
+gdi32.CreateCompatibleBitmap.argtypes = [HDC, ctypes.c_int, ctypes.c_int]
+gdi32.CreateCompatibleBitmap.restype = HBITMAP
+gdi32.SelectObject.argtypes = [HDC, HGDIOBJ]
+gdi32.SelectObject.restype = HGDIOBJ
+gdi32.DeleteObject.argtypes = [HGDIOBJ]
+gdi32.DeleteObject.restype = BOOL
+gdi32.DeleteDC.argtypes = [HDC]
+gdi32.DeleteDC.restype = BOOL
+gdi32.GetBitmapBits.argtypes = [HBITMAP, ctypes.c_long, ctypes.c_void_p]
+gdi32.GetBitmapBits.restype = ctypes.c_long
+
+PW_RENDERFULLCONTENT = 2
 
 # -----------------------------------------------------------------------------
 # Desktop & DPI Initialization (Must occur before COM or window handles)
@@ -443,6 +473,60 @@ def cleanup_screenshot_cache(max_files: int = 50, max_age_hours: float = 24.0) -
         return 0
 
 
+def restore_foreground(hwnd: int) -> bool:
+    """Restores foreground focus back to the user's active window without simulating keys."""
+    if not hwnd or not user32.IsWindow(hwnd) or user32.IsIconic(hwnd):
+        return False
+    user32.SetForegroundWindow(hwnd)
+    deadline = time.monotonic() + 0.3
+    while time.monotonic() < deadline:
+        if user32.GetForegroundWindow() == hwnd:
+            return True
+        time.sleep(0.02)
+    return False
+
+
+def capture_window_background_gdi(hwnd: int) -> Image.Image | None:
+    """Captures a window surface directly in memory via PrintWindow without bringing it to front.
+
+    Works even if the window is occluded or in the background.
+    Returns None if the application does not support offscreen rendering or produces a blank canvas.
+    """
+    if not hwnd or not user32.IsWindow(hwnd) or user32.IsIconic(hwnd):
+        return None
+    rect = wintypes.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(rect))
+    w = rect.right - rect.left
+    h = rect.bottom - rect.top
+    if w <= 0 or h <= 0:
+        return None
+
+    hdc_screen = user32.GetDC(0)
+    hdc_mem = gdi32.CreateCompatibleDC(hdc_screen)
+    hbm = gdi32.CreateCompatibleBitmap(hdc_screen, w, h)
+    prev = gdi32.SelectObject(hdc_mem, hbm)
+    try:
+        res = user32.PrintWindow(hwnd, hdc_mem, PW_RENDERFULLCONTENT)
+        if not res:
+            return None
+        buf = ctypes.create_string_buffer(w * h * 4)
+        gdi32.GetBitmapBits(hbm, len(buf), buf)
+        img = Image.frombuffer("RGB", (w, h), buf, "raw", "BGRX", 0, 1)
+
+        from PIL import ImageStat
+        stat = ImageStat.Stat(img.convert("L"))
+        if stat.stddev[0] < 2.0:
+            return None
+        return img
+    except Exception:
+        return None
+    finally:
+        gdi32.SelectObject(hdc_mem, prev)
+        gdi32.DeleteObject(hbm)
+        gdi32.DeleteDC(hdc_mem)
+        user32.ReleaseDC(0, hdc_screen)
+
+
 def capture_window_image(
     hwnd: int | None = None,
     full_screen: bool = False,
@@ -459,14 +543,14 @@ def capture_window_image(
     if not hwnd and not full_screen:
         hwnd = user32.GetForegroundWindow()
 
-    with mss.MSS() as sct:
-        if full_screen or not hwnd:
-            mon = sct.monitors[0]  # All monitors combined in MSS
-            region = {"left": mon["left"], "top": mon["top"], "width": mon["width"], "height": mon["height"]}
-        else:
+    img: Image.Image | None = None
+    region: dict[str, Any] = {}
+
+    # Background-first GDI offscreen capture (does not steal focus and captures covered windows)
+    if not full_screen and hwnd and hwnd != user32.GetForegroundWindow():
+        img = capture_window_background_gdi(hwnd)
+        if img is not None:
             rect = get_window_rect(hwnd)
-            if rect["width"] <= 0 or rect["height"] <= 0:
-                raise ValueError("Dimensions de fenêtre invalides pour la capture.")
             region = {
                 "left": rect["left"],
                 "top": rect["top"],
@@ -474,8 +558,24 @@ def capture_window_image(
                 "height": rect["height"],
             }
 
-        shot = sct.grab(region)
-        img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+    if img is None:
+        with mss.MSS() as sct:
+            if full_screen or not hwnd:
+                mon = sct.monitors[0]  # All monitors combined in MSS
+                region = {"left": mon["left"], "top": mon["top"], "width": mon["width"], "height": mon["height"]}
+            else:
+                rect = get_window_rect(hwnd)
+                if rect["width"] <= 0 or rect["height"] <= 0:
+                    raise ValueError("Dimensions de fenêtre invalides pour la capture.")
+                region = {
+                    "left": rect["left"],
+                    "top": rect["top"],
+                    "width": rect["width"],
+                    "height": rect["height"],
+                }
+
+            shot = sct.grab(region)
+            img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
 
         # Resize to maintain aspect ratio under max_dimension
         img.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
@@ -739,10 +839,13 @@ def mouse_move(
     smooth: bool = True,
     steps: int = 12,
     duration_ms: int = 40,
+    foreground: bool = False,
 ) -> dict[str, Any]:
     """Moves mouse cursor to window-relative coordinates (x, y) with smooth Bézier/easing trajectory."""
     ensure_default_desktop()
     target_hwnd = hwnd or user32.GetForegroundWindow()
+    if target_hwnd and user32.GetForegroundWindow() != target_hwnd and not foreground:
+        raise RuntimeError("Le survol de souris requiert la mise au premier plan. Pour ne pas interrompre le travail de Julien, passez foreground=True.")
     win_rect = get_window_rect(target_hwnd)
     target_screen_x = win_rect["left"] + x
     target_screen_y = win_rect["top"] + y
@@ -788,6 +891,7 @@ def click(
     y: int | None = None,
     button: str = "left",
     click_count: int = 1,
+    foreground: bool = False,
 ) -> dict[str, Any]:
     """Clicks an element by index [#N] or clicks relative coordinates (x, y) inside target window.
 
@@ -796,12 +900,15 @@ def click(
     ensure_default_desktop()
     target_hwnd = hwnd or user32.GetForegroundWindow()
 
-    # 1. Background-first: Deterministic UI Automation element click (NO FOCUS STEAL)
+    # 1. Background-first: Deterministic UI Automation element actions (NO FOCUS STEAL)
     if element_index is not None and element_index in _element_cache:
         ctrl = _element_cache[element_index]
 
-        # Single left-click via InvokePattern operates entirely in background
+        # Single left-click operates entirely in background across all interactive patterns
         if button.lower() == "left" and click_count == 1:
+            front_before = user32.GetForegroundWindow()
+
+            # Pattern A: InvokePattern (Buttons, Hyperlinks, MenuItems)
             try:
                 invoke_pat = ctrl.GetInvokePattern()
                 if invoke_pat:
@@ -809,12 +916,57 @@ def click(
                     t = threading.Thread(target=invoke_pat.Invoke, daemon=True)
                     t.start()
                     t.join(timeout=0.15)
+                    if front_before and user32.GetForegroundWindow() != front_before:
+                        restore_foreground(front_before)
                     return {"success": True, "method": "uia_invoke", "element_index": element_index}
+            except Exception:
+                pass
+
+            # Pattern B: TogglePattern (CheckBoxes, SwitchButtons)
+            try:
+                toggle_pat = ctrl.GetTogglePattern()
+                if toggle_pat:
+                    toggle_pat.Toggle()
+                    if front_before and user32.GetForegroundWindow() != front_before:
+                        restore_foreground(front_before)
+                    state = getattr(toggle_pat, "ToggleState", None)
+                    return {"success": True, "method": "uia_toggle", "element_index": element_index, "toggle_state": state}
+            except Exception:
+                pass
+
+            # Pattern C: SelectionItemPattern (ListItems, TabItems, RadioButtons)
+            try:
+                sel_pat = ctrl.GetSelectionItemPattern()
+                if sel_pat:
+                    sel_pat.Select()
+                    if front_before and user32.GetForegroundWindow() != front_before:
+                        restore_foreground(front_before)
+                    return {"success": True, "method": "uia_select", "element_index": element_index, "is_selected": getattr(sel_pat, "IsSelected", True)}
+            except Exception:
+                pass
+
+            # Pattern D: ExpandCollapsePattern (ComboBoxes, TreeItems)
+            try:
+                exp_pat = ctrl.GetExpandCollapsePattern()
+                if exp_pat:
+                    state = getattr(exp_pat, "ExpandCollapseState", 0)
+                    if state == 1:
+                        exp_pat.Collapse()
+                    else:
+                        exp_pat.Expand()
+                    if front_before and user32.GetForegroundWindow() != front_before:
+                        restore_foreground(front_before)
+                    return {"success": True, "method": "uia_expand_collapse", "element_index": element_index, "state": getattr(exp_pat, "ExpandCollapseState", 0)}
             except Exception:
                 pass
 
         # If hardware click is required (right-click, double-click, non-invocable), ensure focus and verify occlusion
         if target_hwnd and user32.GetForegroundWindow() != target_hwnd:
+            if not foreground:
+                raise RuntimeError(
+                    f"Ce clic sur l'élément [{element_index}] requiert la souris physique et la mise au premier plan. "
+                    "Pour ne pas interrompre le travail de Julien, passez foreground=True."
+                )
             focus_window(hwnd=target_hwnd)
 
         try:
@@ -833,6 +985,11 @@ def click(
     # 2. Window-relative coordinates (x, y) - requires focus and occlusion check
     if x is not None and y is not None:
         if target_hwnd and user32.GetForegroundWindow() != target_hwnd:
+            if not foreground:
+                raise RuntimeError(
+                    "Un clic à des coordonnées relatives requiert la souris physique et la mise au premier plan. "
+                    "Pour ne pas interrompre le travail de Julien, passez foreground=True."
+                )
             focus_window(hwnd=target_hwnd)
         win_rect = get_window_rect(target_hwnd)
         screen_x = win_rect["left"] + x
@@ -850,6 +1007,7 @@ def type_text(
     hwnd: int | None = None,
     element_index: int | None = None,
     clear_first: bool = False,
+    foreground: bool = False,
 ) -> dict[str, Any]:
     """Types text using Unicode SendInput or sets UIA ValuePattern directly.
 
@@ -864,20 +1022,28 @@ def type_text(
     # 1. Background-first: Direct UIA value replacement without stealing user focus
     if element_index is not None and element_index in _element_cache:
         ctrl = _element_cache[element_index]
+        front_before = user32.GetForegroundWindow()
         try:
             val_pat = ctrl.GetValuePattern()
-            if val_pat:
+            if val_pat and not getattr(val_pat, "IsReadOnly", False):
                 if clear_first:
                     val_pat.SetValue(text)
                 else:
                     curr_val = val_pat.Value or ""
                     val_pat.SetValue(curr_val + text)
+                if front_before and user32.GetForegroundWindow() != front_before:
+                    restore_foreground(front_before)
                 return {"success": True, "method": "uia_set_value", "element_index": element_index}
         except Exception:
             pass
 
     # 2. Hardware Unicode typing fallback (requires window focus and active verification)
     if target_hwnd and user32.GetForegroundWindow() != target_hwnd:
+        if not foreground:
+            raise RuntimeError(
+                "La saisie au clavier physique requiert la mise au premier plan de la fenêtre cible. "
+                "Pour ne pas interrompre le travail de Julien, passez foreground=True."
+            )
         focus_window(hwnd=target_hwnd)
         for _ in range(5):
             if user32.GetForegroundWindow() == target_hwnd:
@@ -891,12 +1057,12 @@ def type_text(
 
     # Fallback to hardware Unicode typing
     if clear_first:
-        press_key("ctrl+a", hwnd=target_hwnd)
-        press_key("backspace", hwnd=target_hwnd)
+        press_key("ctrl+a", hwnd=target_hwnd, foreground=True)
+        press_key("backspace", hwnd=target_hwnd, foreground=True)
 
     for char in text:
         if char == "\n":
-            press_key("enter", hwnd=target_hwnd)
+            press_key("enter", hwnd=target_hwnd, foreground=True)
             time.sleep(0.01)
         else:
             # Encode in UTF-16 LE code units to support surrogate pairs for emojis
@@ -915,13 +1081,18 @@ def type_text(
     return {"success": True, "method": "sendinput_unicode", "char_count": len(text)}
 
 
-def press_key(keys: str, hwnd: int | None = None) -> dict[str, Any]:
+def press_key(keys: str, hwnd: int | None = None, foreground: bool = False) -> dict[str, Any]:
     """Presses key combination (e.g. 'ctrl+c', 'alt+f4', 'win+r', 'enter', 'ctrl+,')."""
     ensure_default_desktop()
     target_hwnd = hwnd or user32.GetForegroundWindow()
 
     # Automatically ensure target window is in the foreground and verified
     if target_hwnd and user32.GetForegroundWindow() != target_hwnd:
+        if not foreground:
+            raise RuntimeError(
+                "L'envoi de touches physiques requiert la mise au premier plan de la fenêtre. "
+                "Pour ne pas interrompre le travail de Julien, passez foreground=True."
+            )
         focus_window(hwnd=target_hwnd)
         for _ in range(5):
             if user32.GetForegroundWindow() == target_hwnd:
@@ -988,11 +1159,50 @@ def scroll(
     hwnd: int | None = None,
     x: int | None = None,
     y: int | None = None,
+    element_index: int | None = None,
+    foreground: bool = False,
 ) -> dict[str, Any]:
-    """Scrolls the mouse wheel vertically (delta_y) or horizontally (delta_x)."""
+    """Scrolls via background UI Automation ScrollPattern or mouse wheel."""
     ensure_default_desktop()
+    target_hwnd = hwnd or user32.GetForegroundWindow()
+
+    # 1. Background-first: UI Automation ScrollPattern without mouse or focus
+    if element_index is not None and element_index in _element_cache:
+        ctrl = _element_cache[element_index]
+        current = ctrl
+        scroll_pat = None
+        for _ in range(15):
+            if not current:
+                break
+            try:
+                sp = current.GetScrollPattern()
+                if sp and ((delta_y != 0 and getattr(sp, "VerticallyScrollable", False)) or (delta_x != 0 and getattr(sp, "HorizontallyScrollable", False))):
+                    scroll_pat = sp
+                    break
+            except Exception:
+                pass
+            try:
+                current = current.GetParentControl()
+            except Exception:
+                break
+
+        if scroll_pat:
+            # ScrollAmount: SmallDecrement=1, NoAmount=2, SmallIncrement=4
+            v_amt = 1 if delta_y > 0 else (4 if delta_y < 0 else 2)
+            h_amt = 4 if delta_x > 0 else (1 if delta_x < 0 else 2)
+            steps = abs(delta_y) or abs(delta_x) or 1
+            for _ in range(min(steps, 20)):
+                scroll_pat.Scroll(h_amt, v_amt)
+            return {"success": True, "method": "uia_scroll", "element_index": element_index, "delta_y": delta_y, "delta_x": delta_x}
+
+    # 2. Hardware mouse wheel fallback
+    if target_hwnd and user32.GetForegroundWindow() != target_hwnd and not foreground:
+        raise RuntimeError(
+            "Le défilement par molette physique requiert la mise au premier plan. "
+            "Pour ne pas interrompre le travail de Julien, passez foreground=True."
+        )
+
     if x is not None and y is not None:
-        target_hwnd = hwnd or user32.GetForegroundWindow()
         win_rect = get_window_rect(target_hwnd)
         user32.SetCursorPos(win_rect["left"] + x, win_rect["top"] + y)
         time.sleep(0.02)
@@ -1024,10 +1234,13 @@ def drag(
     hwnd: int | None = None,
     steps: int = 12,
     delay_ms: int = 15,
+    foreground: bool = False,
 ) -> dict[str, Any]:
     """Performs a smooth mouse drag between two coordinates."""
     ensure_default_desktop()
     target_hwnd = hwnd or user32.GetForegroundWindow()
+    if target_hwnd and user32.GetForegroundWindow() != target_hwnd and not foreground:
+        raise RuntimeError("Le glisser-déposer à la souris requiert la mise au premier plan. Pour ne pas interrompre le travail de Julien, passez foreground=True.")
     win_rect = get_window_rect(target_hwnd)
 
     screen_from_x = win_rect["left"] + from_x
