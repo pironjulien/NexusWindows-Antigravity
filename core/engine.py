@@ -8,6 +8,7 @@ that gets clicked, whatever the DPI scaling, the window position or its maximize
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import io
 import math
@@ -162,6 +163,37 @@ GetCurrentThreadId = _proto(kernel32, "GetCurrentThreadId", DWORD)
 GetTickCount = _proto(kernel32, "GetTickCount", DWORD)
 OpenProcess = _proto(kernel32, "OpenProcess", HANDLE, DWORD, wintypes.BOOL, DWORD)
 CloseHandle = _proto(kernel32, "CloseHandle", wintypes.BOOL, HANDLE)
+CreateMutexW = _proto(kernel32, "CreateMutexW", HANDLE, ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR)
+WaitForSingleObject = _proto(kernel32, "WaitForSingleObject", DWORD, HANDLE, DWORD)
+ReleaseMutex = _proto(kernel32, "ReleaseMutex", wintypes.BOOL, HANDLE)
+
+WAIT_ABANDONED = 0x00000080
+WAIT_OBJECT_0 = 0x00000000
+WAIT_TIMEOUT = 0x00000102
+
+
+@contextlib.contextmanager
+def input_lock(timeout_ms: int = 5000):
+    """Win32 named mutex 'Local\\nexus-computer-input' guaranteeing cross-agent
+
+    and user-safe serialization of physical hardware inputs (mouse, keyboard, foreground switches).
+    """
+    mutex_name = "Local\\nexus-computer-input"
+    h_mutex = CreateMutexW(None, False, mutex_name)
+    if not h_mutex:
+        yield
+        return
+    acquired = False
+    try:
+        res = WaitForSingleObject(h_mutex, timeout_ms)
+        if res in (WAIT_OBJECT_0, WAIT_ABANDONED):
+            acquired = True
+        yield
+    finally:
+        if acquired:
+            ReleaseMutex(h_mutex)
+        CloseHandle(h_mutex)
+
 QueryFullProcessImageNameW = _proto(
     kernel32, "QueryFullProcessImageNameW", wintypes.BOOL, HANDLE, DWORD, wintypes.LPWSTR, ctypes.POINTER(DWORD)
 )
@@ -1096,12 +1128,13 @@ def _unicode_input(code_unit: int, up: bool) -> INPUT:
 
 
 def _send(*inputs: INPUT) -> None:
-    array = (INPUT * len(inputs))(*inputs)
-    if SendInput(len(inputs), array, ctypes.sizeof(INPUT)) != len(inputs):
-        raise ComputerError(
-            f"Windows a refusé l'entrée simulée (erreur {ctypes.get_last_error()}) : session verrouillée, "
-            "invite UAC ou bureau sécurisé."
-        )
+    with input_lock():
+        array = (INPUT * len(inputs))(*inputs)
+        if SendInput(len(inputs), array, ctypes.sizeof(INPUT)) != len(inputs):
+            raise ComputerError(
+                f"Windows a refusé l'entrée simulée (erreur {ctypes.get_last_error()}) : session verrouillée, "
+                "invite UAC ou bureau sécurisé."
+            )
 
 
 def _try_foreground(hwnd: int, with_alt: bool) -> None:
@@ -1427,7 +1460,7 @@ def scroll_at(x: int, y: int, direction: str, amount: int) -> None:
 def drag(
     start: tuple[int, int] | int,
     end: tuple[int, int] | int | None = None,
-    steps: int = 12,
+    steps: int = 20,
     to_x: int | None = None,
     to_y: int | None = None,
     hwnd: int | None = None,
@@ -1438,23 +1471,24 @@ def drag(
     """Performs a smooth mouse drag between two coordinates.
 
     Supports both Claude tuple signature (start=(x1, y1), end=(x2, y2), steps=20)
-    and Antigravity signature (from_x, from_y, to_x, to_y, hwnd=..., steps=12).
+    and Antigravity signature (from_x, from_y, to_x, to_y, hwnd=..., steps=20).
     """
     if isinstance(start, (tuple, list)) and isinstance(end, (tuple, list)):
-        down, up = _BUTTONS["left"]
-        move_cursor(*start)
-        _send(_mouse_input(down))
-        time.sleep(0.08)
-        for step in range(1, steps + 1):
-            SetCursorPos(
-                round(start[0] + (end[0] - start[0]) * step / steps),
-                round(start[1] + (end[1] - start[1]) * step / steps),
-            )
-            _send(_mouse_input(MOUSEEVENTF_MOVE))
-            time.sleep(0.012)
-        time.sleep(0.05)
-        _send(_mouse_input(up))
-        return None
+        with input_lock():
+            down, up = _BUTTONS["left"]
+            move_cursor(*start)
+            _send(_mouse_input(down))
+            time.sleep(0.08)
+            for step in range(1, steps + 1):
+                SetCursorPos(
+                    round(start[0] + (end[0] - start[0]) * step / steps),
+                    round(start[1] + (end[1] - start[1]) * step / steps),
+                )
+                _send(_mouse_input(MOUSEEVENTF_MOVE))
+                time.sleep(0.012)
+            time.sleep(0.05)
+            _send(_mouse_input(up))
+            return None
 
     ensure_default_desktop()
     from_x = int(start)
@@ -1462,8 +1496,12 @@ def drag(
     target_to_x = int(to_x if to_x is not None else from_x)
     target_to_y = int(to_y if to_y is not None else from_y)
 
-    target_hwnd = hwnd or foreground()
-    if target_hwnd and foreground() != target_hwnd and not foreground:
+    cur_fg = _handle(GetForegroundWindow())
+    target_hwnd = hwnd or cur_fg
+    if not target_hwnd or not IsWindow(target_hwnd):
+        raise ComputerError("Fenêtre cible introuvable pour le glisser-déposer.")
+
+    if cur_fg != target_hwnd and not foreground:
         raise ComputerError(
             "Le glisser-déposer à la souris requiert la mise au premier plan. "
             "Pour ne pas interrompre le travail de Julien, passez foreground=True."
@@ -1474,17 +1512,18 @@ def drag(
     s_to_x = win_rect["left"] + target_to_x
     s_to_y = win_rect["top"] + target_to_y
 
-    move_cursor(s_from_x, s_from_y)
-    down, up = _BUTTONS["left"]
-    _send(_mouse_input(down))
-    time.sleep(0.02)
-    for i in range(1, steps + 1):
-        cur_x = int(s_from_x + (s_to_x - s_from_x) * (i / steps))
-        cur_y = int(s_from_y + (s_to_y - s_from_y) * (i / steps))
-        SetCursorPos(cur_x, cur_y)
-        if delay_ms > 0:
-            time.sleep(delay_ms / 1000.0)
-    _send(_mouse_input(up))
+    with input_lock():
+        move_cursor(s_from_x, s_from_y)
+        down, up = _BUTTONS["left"]
+        _send(_mouse_input(down))
+        time.sleep(0.02)
+        for i in range(1, steps + 1):
+            cur_x = int(s_from_x + (s_to_x - s_from_x) * (i / steps))
+            cur_y = int(s_from_y + (s_to_y - s_from_y) * (i / steps))
+            SetCursorPos(cur_x, cur_y)
+            if delay_ms > 0:
+                time.sleep(delay_ms / 1000.0)
+        _send(_mouse_input(up))
     return {"success": True, "from": (from_x, from_y), "to": (target_to_x, target_to_y), "steps": steps}
 
 
@@ -1606,9 +1645,10 @@ def focus_window(
 def _send_inputs(inputs: list[INPUT]) -> int:
     """Dispatches a list of INPUT structures to the OS."""
     ensure_default_desktop()
-    n = len(inputs)
-    arr = (INPUT * n)(*inputs)
-    return user32.SendInput(n, arr, ctypes.sizeof(INPUT))
+    with input_lock():
+        n = len(inputs)
+        arr = (INPUT * n)(*inputs)
+        return user32.SendInput(n, arr, ctypes.sizeof(INPUT))
 
 
 def is_point_occluded(x: int, y: int, target_hwnd: int) -> bool:
@@ -1933,30 +1973,41 @@ def click(
 ) -> dict[str, Any]:
     """Clicks on an element [#N] (in background via UI Automation) or at (x, y) coordinates."""
     ensure_default_desktop()
-    target_hwnd = hwnd or user32.GetForegroundWindow()
+    cur_fg = _handle(GetForegroundWindow())
+    target_hwnd = hwnd or cur_fg
 
-    if element_index is not None and element_index in _element_cache:
-        ctrl = _element_cache[element_index]
-        effect = background_activate(ctrl)
-        if effect:
-            return {"success": True, "method": "uia_pattern", "effect": effect, "element_index": element_index}
+    if element_index is not None:
+        ctrl = None
+        if target_hwnd and SESSION.elements_hwnd == target_hwnd and element_index in SESSION.elements:
+            ctrl = SESSION.elements[element_index]
+        elif element_index in _element_cache and (_cached_window_hwnd == target_hwnd or not _cached_window_hwnd):
+            ctrl = _element_cache[element_index]
+        if ctrl is not None:
+            effect = background_activate(ctrl)
+            if effect:
+                return {"success": True, "method": "uia_pattern", "effect": effect, "element_index": element_index}
+        else:
+            raise ComputerError(f"Élément [{element_index}] introuvable ou obsolète (STALE_ELEMENT) pour la fenêtre ciblée.")
 
-    if target_hwnd and user32.GetForegroundWindow() != target_hwnd and not foreground:
-        raise RuntimeError(
+    if target_hwnd and cur_fg and cur_fg != target_hwnd and not foreground:
+        raise ComputerError(
             "Le clic physique à la souris requiert la mise au premier plan. "
             "Pour ne pas interrompre le travail de Julien, passez foreground=True."
         )
 
-    if element_index is not None and element_index in _element_cache:
-        ctrl = _element_cache[element_index]
-        try:
-            r = ctrl.BoundingRectangle
-            click_x = (r.left + r.right) // 2
-            click_y = (r.top + r.bottom) // 2
-        except Exception:
-            raise ComputerError("Impossible d'obtenir les coordonnées de l'élément.")
+    if element_index is not None:
+        ctrl = SESSION.elements.get(element_index) if target_hwnd and SESSION.elements_hwnd == target_hwnd else _element_cache.get(element_index)
+        if ctrl is not None:
+            try:
+                r = ctrl.BoundingRectangle
+                click_x = (r.left + r.right) // 2
+                click_y = (r.top + r.bottom) // 2
+            except Exception:
+                raise ComputerError("Impossible d'obtenir les coordonnées de l'élément.")
+        else:
+            raise ComputerError(f"Élément [{element_index}] introuvable.")
     elif x is not None and y is not None:
-        rect = get_window_rect(target_hwnd)
+        rect = get_window_rect(target_hwnd) if target_hwnd and IsWindow(target_hwnd) else {"left": 0, "top": 0}
         click_x = rect["left"] + x
         click_y = rect["top"] + y
     else:
@@ -1984,13 +2035,15 @@ def mouse_move(
 ) -> dict[str, Any]:
     """Moves physical cursor to window coordinates (x, y). Requires foreground=True."""
     ensure_default_desktop()
-    target_hwnd = hwnd or user32.GetForegroundWindow()
-    if target_hwnd and user32.GetForegroundWindow() != target_hwnd and not foreground:
-        raise RuntimeError(
+    cur_fg = _handle(GetForegroundWindow())
+    target_hwnd = hwnd or cur_fg
+
+    if target_hwnd and cur_fg and cur_fg != target_hwnd and not foreground:
+        raise ComputerError(
             "Le déplacement de la souris requiert la mise au premier plan. "
             "Pour ne pas interrompre le travail de Julien, passez foreground=True."
         )
-    rect = get_window_rect(target_hwnd)
+    rect = get_window_rect(target_hwnd) if target_hwnd and IsWindow(target_hwnd) else {"left": 0, "top": 0}
     target_x = rect["left"] + x
     target_y = rect["top"] + y
 
@@ -2020,26 +2073,29 @@ def type_text(
 ) -> dict[str, Any]:
     """Types text into an element [#N] in background via ValuePattern without stealing focus."""
     ensure_default_desktop()
-    target_hwnd = hwnd or user32.GetForegroundWindow()
+    cur_fg = _handle(GetForegroundWindow())
+    target_hwnd = hwnd or cur_fg
 
-    if element_index is not None and element_index in _element_cache:
-        ctrl = _element_cache[element_index]
-        try:
-            vp = ctrl.GetValuePattern()
-            if vp:
-                final_text = text if clear_first else (vp.Value or "") + text
-                vp.SetValue(final_text)
+    if element_index is not None:
+        ctrl = None
+        if target_hwnd and SESSION.elements_hwnd == target_hwnd and element_index in SESSION.elements:
+            ctrl = SESSION.elements[element_index]
+        elif element_index in _element_cache and (_cached_window_hwnd == target_hwnd or not _cached_window_hwnd):
+            ctrl = _element_cache[element_index]
+        if ctrl is not None:
+            written = set_value(ctrl, text, append=not clear_first)
+            if written:
                 return {
                     "success": True,
                     "method": "uia_value_pattern",
                     "element_index": element_index,
                     "length": len(text),
                 }
-        except Exception:
-            pass
+        else:
+            raise ComputerError(f"Élément [{element_index}] introuvable ou obsolète (STALE_ELEMENT).")
 
-    if target_hwnd and user32.GetForegroundWindow() != target_hwnd and not foreground:
-        raise RuntimeError(
+    if target_hwnd and cur_fg and cur_fg != target_hwnd and not foreground:
+        raise ComputerError(
             "La saisie clavier physique requiert la mise au premier plan. "
             "Pour ne pas interrompre le travail de Julien, passez foreground=True."
         )

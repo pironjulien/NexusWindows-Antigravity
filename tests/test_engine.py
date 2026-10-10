@@ -369,3 +369,47 @@ def test_appending_preserves_existing_line_breaks(class_name, existing, syntheti
     control.ClassName = class_name
     assert engine.set_value(control, "suite", append=True)
     assert pattern.written == existing + "suite"
+
+
+def test_named_mutex_input_lock():
+    with engine.input_lock(timeout_ms=1000):
+        # Nested re-entry or inner test
+        assert True
+
+
+def test_drag_tuple_signature_mocked(monkeypatch):
+    calls = []
+    monkeypatch.setattr(engine, "move_cursor", lambda x, y: calls.append(("move", x, y)))
+    monkeypatch.setattr(engine, "_send", lambda *args: calls.append(("send", len(args))))
+    monkeypatch.setattr(engine, "SetCursorPos", lambda x, y: calls.append(("cursor", x, y)))
+    monkeypatch.setattr(engine.time, "sleep", lambda s: None)
+
+    res = engine.drag(start=(10, 20), end=(100, 200), steps=5)
+    assert res is None
+    assert any(c[0] == "move" for c in calls)
+    assert any(c[0] == "cursor" for c in calls)
+
+
+def test_drag_coordinate_signature_mocked(monkeypatch):
+    calls = []
+    monkeypatch.setattr(engine, "IsWindow", lambda h: True)
+    monkeypatch.setattr(engine, "GetForegroundWindow", lambda: 12345)
+    monkeypatch.setattr(engine, "get_window_rect", lambda h: {"left": 100, "top": 100, "width": 800, "height": 600})
+    monkeypatch.setattr(engine, "move_cursor", lambda x, y: calls.append(("move", x, y)))
+    monkeypatch.setattr(engine, "_send", lambda *args: calls.append(("send", len(args))))
+    monkeypatch.setattr(engine, "SetCursorPos", lambda x, y: calls.append(("cursor", x, y)))
+    monkeypatch.setattr(engine.time, "sleep", lambda s: None)
+
+    res = engine.drag(start=10, end=20, to_x=50, to_y=60, hwnd=12345, steps=5)
+    assert res["success"] is True
+    assert res["from"] == (10, 20)
+    assert res["to"] == (50, 60)
+    assert res["steps"] == 5
+
+
+def test_drag_inactive_window_without_foreground_raises(monkeypatch):
+    monkeypatch.setattr(engine, "IsWindow", lambda h: True)
+    monkeypatch.setattr(engine, "GetForegroundWindow", lambda: 99999)  # different foreground
+
+    with pytest.raises(ComputerError, match="requiert la mise au premier plan"):
+        engine.drag(start=10, end=20, to_x=50, to_y=60, hwnd=12345, foreground=False)

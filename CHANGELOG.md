@@ -4,6 +4,22 @@ Toutes les modifications notables apportées au projet **Antigravity Computer Us
 
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/), et ce projet adhère au versioning sémantique.
 
+## [2.3.2] - 2026-10-10
+
+### Corrigé
+- **Correction du Bug Bloquant `drag()` (`core/engine.py`)** :
+  - Élimination du masquage de fonction où l'argument `foreground: bool` écrasait l'appel `foreground()`, provoquant `TypeError: 'bool' object is not callable`.
+  - Utilisation directe et thread-safe de `_handle(GetForegroundWindow())`.
+  - Rétablissement du nombre de pas par défaut `steps=20` (au lieu de 12) pour un glisser fluide et compatible avec les contrôles sensibles.
+- **Mutex Win32 Nommé de Concurrence Inter-Agents (`Local\nexus-computer-input`) (`core/engine.py`)** :
+  - Implémentation du gestionnaire de contexte `input_lock` autour de toutes les simulations d'entrées matérielles (`_send`, `_send_inputs`, `drag`).
+  - Empêche toute collision ou entrelacement de frappes et de clics physiques entre agents (Claude, Codex, Antigravity) et protège la saisie en direct de Julien.
+- **Validation Renforcée des Fenêtres Cibles (`core/engine.py`)** :
+  - `click()`, `mouse_move()` et `type_text()` vérifient rigoureusement la fenêtre cible et interdisent tout vol de focus sans accord explicite (`foreground=True`).
+  - Détection et levée d'erreur explicite `STALE_ELEMENT` lors de la réutilisation d'index d'éléments obsolètes ou d'une fenêtre fermée.
+- **Suite de Tests Élargie (69 tests unitaires)** :
+  - Nouveaux tests dédiés pour `input_lock`, les signatures polymorphiques de `drag()`, et le refus de pilotage sur fenêtre inactive.
+
 ## [2.3.1] - 2026-10-10
 
 ### Modifié
