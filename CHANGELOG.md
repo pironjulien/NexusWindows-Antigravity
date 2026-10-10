@@ -18,6 +18,18 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
   - Fonction `restore_foreground()` rétablissant instantanément le focus sur la fenêtre active de l'utilisateur si une application tierce (ex. WinForms, modales) s'active d'elle-même lors d'une action UIA.
 - **Garde-Fou Matériel de Sécurité (*Foreground Protection Guard*) (`client/computer_client.py`, `client/mcp_server.py`)** :
   - Paramètre `foreground: bool = False` ajouté à `computer_click`, `computer_type_text`, `computer_press_key`, `computer_scroll`, `computer_mouse_move` et `computer_drag` : refus formel d'envoyer des événements physiques avec la souris ou le clavier si la fenêtre cible n'est pas active, garantissant à 100% que l'utilisateur n'est jamais interrompu pendant son travail sans accord explicite.
+- **Générateur Autonome de Démo Studio & Animations Visuelles (`generate_demo.py`)** :
+  - Pipeline de capture et encodage multi-formats produisant `assets/demo.webp` (79 Ko), `assets/demo.mp4` (73 Ko) et `assets/demo.gif` (117 Ko) avec HUD télémétrique démontrant l'exécution 100% silencieuse sans vol de focus.
+- **Support Multi-Clients MCP (Claude Code, Claude Desktop, OpenAI Codex, Antigravity)** :
+  - Guides d'intégration clés en main et configuration FastMCP pour tous les agents majeurs.
+
+### Corrigé
+- **Retour des Données de Capture GDI Hors-Écran (`client/computer_client.py`)** :
+  - Correction d'un bug d'indentation où le bloc de sérialisation et d'annotation WebP était imbriqué dans `if img is None:`, causant le renvoi de `None` lors des captures GDI hors-écran.
+- **Énumération Exhaustive des Fenêtres de Bureau (`client/computer_client.py`)** :
+  - Utilisation de `user32.EnumWindows` avec repli `user32.EnumDesktopWindows`, résolvant la non-détection des fenêtres appartenant à d'autres threads ou runtimes (.NET/WinForms).
+- **Initialisation COM dans le Thread d'Invocation (`client/computer_client.py`)** :
+  - Encadrement de `InvokePattern.Invoke()` par `CoInitialize`/`CoUninitialize`, éliminant les erreurs `_ctypes.COMError: Paramètre incorrect` lors des invocations asynchrones.
 
 ## [2.1.0] - 2026-10-10
 

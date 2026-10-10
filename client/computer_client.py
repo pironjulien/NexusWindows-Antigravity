@@ -347,10 +347,9 @@ def list_windows(visible_only: bool = True) -> list[dict[str, Any]]:
         return True
 
     proc = WNDENUMPROC(enum_cb)
-    if _hdesk_default:
+    user32.EnumWindows(proc, 0)
+    if not windows and _hdesk_default:
         user32.EnumDesktopWindows(_hdesk_default, proc, 0)
-    else:
-        user32.EnumWindows(proc, 0)
 
     # Sort foreground window first, then by title
     windows.sort(key=lambda w: (not w["is_foreground"], w["process_name"].lower(), w["title"].lower()))
@@ -577,50 +576,51 @@ def capture_window_image(
             shot = sct.grab(region)
             img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
 
-        # Resize to maintain aspect ratio under max_dimension
-        img.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
+    # Resize to maintain aspect ratio under max_dimension
+    img.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
 
-        # Visual Set-of-Marks overlay annotations (Stanford SoM style)
-        if elements_to_annotate:
-            try:
-                from PIL import ImageDraw
-                draw = ImageDraw.Draw(img)
-                for el in elements_to_annotate:
-                    box = el.get("gemini_box_2d")
-                    if box and len(box) == 4:
-                        ymin, xmin, ymax, xmax = box
-                        left = int(xmin / 1000.0 * img.width)
-                        top = int(ymin / 1000.0 * img.height)
-                        right = int(xmax / 1000.0 * img.width)
-                        bottom = int(ymax / 1000.0 * img.height)
-                        draw.rectangle([left, top, right, bottom], outline=(255, 60, 60), width=1)
-                        badge_w = 16 if el["index"] < 10 else (22 if el["index"] < 100 else 28)
-                        badge_h = min(13, max(8, bottom - top))
-                        draw.rectangle([left, top, min(right, left + badge_w), top + badge_h], fill=(255, 60, 60))
-                        draw.text((left + 2, top + 1), str(el["index"]), fill=(255, 255, 255))
-            except Exception:
-                pass
+    # Visual Set-of-Marks overlay annotations (Stanford SoM style)
+    if elements_to_annotate:
+        try:
+            from PIL import ImageDraw
+            draw = ImageDraw.Draw(img)
+            for el in elements_to_annotate:
+                box = el.get("gemini_box_2d")
+                if box and len(box) == 4:
+                    ymin, xmin, ymax, xmax = box
+                    left = int(xmin / 1000.0 * img.width)
+                    top = int(ymin / 1000.0 * img.height)
+                    right = int(xmax / 1000.0 * img.width)
+                    bottom = int(ymax / 1000.0 * img.height)
+                    draw.rectangle([left, top, right, bottom], outline=(255, 60, 60), width=1)
+                    badge_w = 16 if el["index"] < 10 else (22 if el["index"] < 100 else 28)
+                    badge_h = min(13, max(8, bottom - top))
+                    draw.rectangle([left, top, min(right, left + badge_w), top + badge_h], fill=(255, 60, 60))
+                    draw.text((left + 2, top + 1), str(el["index"]), fill=(255, 255, 255))
+        except Exception:
+            pass
 
+    buf = io.BytesIO()
+    img.save(buf, format="WEBP", quality=quality, method=4)
+    data = buf.getvalue()
+
+    # If data exceeds 180 KB, recompress with slightly lower quality
+    if len(data) > 180 * 1024:
         buf = io.BytesIO()
-        img.save(buf, format="WEBP", quality=quality, method=4)
+        img.save(buf, format="WEBP", quality=70, method=4)
         data = buf.getvalue()
 
-        # If data exceeds 180 KB, recompress with slightly lower quality
-        if len(data) > 180 * 1024:
-            buf = io.BytesIO()
-            img.save(buf, format="WEBP", quality=70, method=4)
-            data = buf.getvalue()
+    if return_meta:
+        meta = {
+            "original_bounds": region,
+            "original_size": (region["width"], region["height"]),
+            "captured_size": img.size,
+            "scale_factor": round(img.size[0] / max(1, region["width"]), 4),
+        }
+        return data, meta
 
-        if return_meta:
-            meta = {
-                "original_bounds": region,
-                "original_size": (region["width"], region["height"]),
-                "captured_size": img.size,
-                "scale_factor": round(img.size[0] / max(1, region["width"]), 4),
-            }
-            return data, meta
+    return data
 
-        return data
 
 
 # -----------------------------------------------------------------------------
@@ -914,7 +914,20 @@ def click(
                 invoke_pat = ctrl.GetInvokePattern()
                 if invoke_pat:
                     import threading
-                    t = threading.Thread(target=invoke_pat.Invoke, daemon=True)
+
+                    def _do_invoke() -> None:
+                        try:
+                            ctypes.windll.ole32.CoInitialize(None)
+                            invoke_pat.Invoke()
+                        except Exception:
+                            pass
+                        finally:
+                            try:
+                                ctypes.windll.ole32.CoUninitialize()
+                            except Exception:
+                                pass
+
+                    t = threading.Thread(target=_do_invoke, daemon=True)
                     t.start()
                     t.join(timeout=0.15)
                     if front_before and user32.GetForegroundWindow() != front_before:
