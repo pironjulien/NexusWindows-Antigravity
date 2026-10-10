@@ -13,6 +13,10 @@ venv/
 # Test & Log
 *.log
 screenshots/
+.backups/
+tests/_live/
+tests/e2e_claude.py
+@AutomationLog.txt
 
 # OS
 .DS_Store
