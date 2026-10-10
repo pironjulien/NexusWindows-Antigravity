@@ -1,7 +1,7 @@
 [project]
-name = "nexus-agy"
-version = "2.0.0"
-description = "Authenticated local browser automation bridge for Google Antigravity"
+name = "antigravity-computer-use"
+version = "2.1.0"
+description = "SOTA Windows OS Computer Use & Spotlight Companion for Google Antigravity"
 requires-python = ">=3.10"
 dependencies = [
     "mcp>=1.0.0,<2",

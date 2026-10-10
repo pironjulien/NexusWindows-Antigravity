@@ -9,13 +9,17 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "native-host"))
 
-import bridge_server
-from bridge_security import load_or_create_token
+try:
+    import bridge_server
+    from bridge_security import load_or_create_token
+except ImportError:
+    bridge_server = None
+    load_or_create_token = None
 
 
 @pytest.fixture(scope="module", autouse=True)
 def isolated_bridge(request, tmp_path_factory):
-    if not hasattr(request.module, "HTTP_PORT"):
+    if bridge_server is None or not hasattr(request.module, "HTTP_PORT"):
         yield
         return
     token_file = tmp_path_factory.mktemp("bridge") / "token"

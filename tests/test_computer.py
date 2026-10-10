@@ -111,3 +111,22 @@ def test_mcp_modular_scopes():
     assert all(name.startswith("browser_") for name in browser_tools)
     assert all(name.startswith("computer_") for name in computer_tools)
     assert set(browser_tools).union(set(computer_tools)) == set(combined_tools)
+
+
+def test_press_key_punctuation():
+    # Should resolve punctuation keys properly via VkKeyScanW without ValueError
+    res = computer_client.press_key("ctrl+,")
+    assert res["success"] is True
+    assert len(res["vk_codes"]) >= 2
+
+    res_dot = computer_client.press_key("ctrl+.")
+    assert res_dot["success"] is True
+    assert len(res_dot["vk_codes"]) >= 2
+
+
+def test_dwm_bounds_accurate():
+    windows = computer_client.list_windows(visible_only=True)
+    if windows:
+        rect = computer_client.get_window_rect(windows[0]["hwnd"])
+        assert rect["width"] > 0
+        assert rect["height"] > 0

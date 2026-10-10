@@ -80,9 +80,24 @@ KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_UNICODE = 0x0004
 KEYEVENTF_SCANCODE = 0x0008
 
+DWMWA_EXTENDED_FRAME_BOUNDS = 9
 DWMWA_CLOAKED = 14
 SW_RESTORE = 9
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+# Extended navigation keys requiring KEYEVENTF_EXTENDEDKEY
+EXTENDED_VKEYS = {
+    0x21,  # PageUp
+    0x22,  # PageDown
+    0x23,  # End
+    0x24,  # Home
+    0x25,  # Left
+    0x26,  # Up
+    0x27,  # Right
+    0x28,  # Down
+    0x2D,  # Insert
+    0x2E,  # Delete
+}
 
 WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
@@ -215,8 +230,26 @@ def is_window_cloaked(hwnd: int) -> bool:
 
 
 def get_window_rect(hwnd: int) -> dict[str, int]:
-    """Retrieves bounding rectangle of window."""
+    """Retrieves visible bounding rectangle of window.
+
+    Prioritizes DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS) to eliminate
+    invisible drop-shadow frames and accurately reflect maximized window dimensions.
+    """
     r = RECT()
+    try:
+        res = dwmapi.DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, ctypes.byref(r), ctypes.sizeof(r))
+        if res == 0 and (r.right > r.left or r.bottom > r.top):
+            return {
+                "left": r.left,
+                "top": r.top,
+                "right": r.right,
+                "bottom": r.bottom,
+                "width": max(0, r.right - r.left),
+                "height": max(0, r.bottom - r.top),
+            }
+    except Exception:
+        pass
+
     user32.GetWindowRect(hwnd, ctypes.byref(r))
     return {
         "left": r.left,
@@ -345,21 +378,33 @@ def focus_window(
 
     cur_tid = kernel32.GetCurrentThreadId()
     target_tid = user32.GetWindowThreadProcessId(target_hwnd, None)
+    fg_hwnd = user32.GetForegroundWindow()
+    fg_tid = user32.GetWindowThreadProcessId(fg_hwnd, None) if fg_hwnd else 0
 
+    attached_fg = False
+    attached_target = False
     try:
-        user32.AttachThreadInput(cur_tid, target_tid, True)
+        # Attach to current foreground thread to inherit foreground activation rights
+        if fg_tid and fg_tid != cur_tid:
+            attached_fg = bool(user32.AttachThreadInput(cur_tid, fg_tid, True))
+        if target_tid and target_tid != cur_tid:
+            attached_target = bool(user32.AttachThreadInput(cur_tid, target_tid, True))
     except Exception:
         pass
 
-    if user32.IsIconic(target_hwnd):
-        user32.ShowWindow(target_hwnd, SW_RESTORE)
-    user32.BringWindowToTop(target_hwnd)
-    success = bool(user32.SetForegroundWindow(target_hwnd))
-
     try:
-        user32.AttachThreadInput(cur_tid, target_tid, False)
-    except Exception:
-        pass
+        if user32.IsIconic(target_hwnd):
+            user32.ShowWindow(target_hwnd, SW_RESTORE)
+        user32.BringWindowToTop(target_hwnd)
+        success = bool(user32.SetForegroundWindow(target_hwnd))
+    finally:
+        try:
+            if attached_fg and fg_tid:
+                user32.AttachThreadInput(cur_tid, fg_tid, False)
+            if attached_target and target_tid:
+                user32.AttachThreadInput(cur_tid, target_tid, False)
+        except Exception:
+            pass
 
     time.sleep(0.08)  # Short stabilization pause
     rect = get_window_rect(target_hwnd)
@@ -384,23 +429,27 @@ def capture_window_image(
     full_screen: bool = False,
     max_dimension: int = 1280,
     quality: int = 85,
-) -> bytes:
-    """Captures the target window or full screen and compresses to WebP (< 200 KB)."""
+    return_meta: bool = False,
+) -> bytes | tuple[bytes, dict[str, Any]]:
+    """Captures the target window or full screen and compresses to WebP (< 200 KB).
+
+    Supports multi-monitor desktop setups and negative coordinates.
+    """
     ensure_default_desktop()
     if not hwnd and not full_screen:
         hwnd = user32.GetForegroundWindow()
 
     with mss.MSS() as sct:
         if full_screen or not hwnd:
-            mon = sct.monitors[1]  # Primary monitor
+            mon = sct.monitors[0]  # All monitors combined in MSS
             region = {"left": mon["left"], "top": mon["top"], "width": mon["width"], "height": mon["height"]}
         else:
             rect = get_window_rect(hwnd)
             if rect["width"] <= 0 or rect["height"] <= 0:
                 raise ValueError("Dimensions de fenêtre invalides pour la capture.")
             region = {
-                "left": max(0, rect["left"]),
-                "top": max(0, rect["top"]),
+                "left": rect["left"],
+                "top": rect["top"],
                 "width": rect["width"],
                 "height": rect["height"],
             }
@@ -420,6 +469,15 @@ def capture_window_image(
             buf = io.BytesIO()
             img.save(buf, format="WEBP", quality=70, method=4)
             data = buf.getvalue()
+
+        if return_meta:
+            meta = {
+                "original_bounds": region,
+                "original_size": (region["width"], region["height"]),
+                "captured_size": img.size,
+                "scale_factor": round(img.size[0] / max(1, region["width"]), 4),
+            }
+            return data, meta
 
         return data
 
@@ -448,10 +506,14 @@ def get_window_state(
     max_elements: int = 50,
     capture_screenshot: bool = False,
     output_path: str | None = None,
+    max_depth: int = 30,
+    time_budget: float = 1.618,
+    include_data_url: bool = False,
 ) -> dict[str, Any]:
     """Extracts compact UI Automation interactive elements and optional WebP screenshot.
 
     Equips Antigravity with Set-of-Marks markers [#1], [#2] and Gemini box_2d coordinates.
+    Bounded by max_depth and a harmonic time budget (1.618s) with spatial pruning.
     """
     global _element_cache, _cached_window_hwnd
     ensure_default_desktop()
@@ -481,18 +543,32 @@ def get_window_state(
         try:
             root_ctrl = uia.ControlFromHandle(target_hwnd)
             if root_ctrl:
+                start_time = time.perf_counter()
 
                 def walk(ctrl: Any, depth: int = 0) -> None:
-                    if depth > 6 or len(elements) >= max_elements:
+                    if depth > max_depth or len(elements) >= max_elements:
                         return
-                    for child in ctrl.GetChildren():
-                        if len(elements) >= max_elements:
-                            break
-                        ctype = child.ControlTypeName
-                        c_rect = child.BoundingRectangle
-                        cw = c_rect.right - c_rect.left
-                        ch = c_rect.bottom - c_rect.top
+                    if (time.perf_counter() - start_time) > time_budget:
+                        return
 
+                    for child in ctrl.GetChildren():
+                        if len(elements) >= max_elements or (time.perf_counter() - start_time) > time_budget:
+                            break
+                        try:
+                            c_rect = child.BoundingRectangle
+                            cw = c_rect.right - c_rect.left
+                            ch = c_rect.bottom - c_rect.top
+                        except Exception:
+                            continue
+
+                        # Spatial pruning: ignore controls outside the visible window boundary
+                        if (c_rect.right <= win_rect["left"] or
+                            c_rect.bottom <= win_rect["top"] or
+                            c_rect.left >= win_rect["right"] or
+                            c_rect.top >= win_rect["bottom"]):
+                            continue
+
+                        ctype = child.ControlTypeName
                         if ctype in INTERACTIVE_CONTROL_TYPES and cw > 0 and ch > 0:
                             idx = len(elements) + 1
                             _element_cache[idx] = child
@@ -544,13 +620,23 @@ def get_window_state(
     }
 
     if capture_screenshot or output_path:
-        webp_bytes = capture_window_image(target_hwnd)
-        if output_path:
-            dest = Path(output_path).expanduser().resolve()
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(webp_bytes)
-            result["screenshot_path"] = str(dest)
-        else:
+        webp_bytes, meta = capture_window_image(target_hwnd, return_meta=True)
+        result["image_dimensions"] = meta.get("captured_size")
+        result["scale_factor"] = meta.get("scale_factor")
+
+        dest_path = output_path
+        if not dest_path:
+            cache_dir = Path.home() / ".nexusagy" / "screenshots"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = int(time.time() * 1000)
+            dest_path = str(cache_dir / f"window_state_{timestamp}.webp")
+
+        dest = Path(dest_path).expanduser().resolve()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(webp_bytes)
+        result["screenshot_path"] = str(dest)
+
+        if include_data_url:
             result["screenshot_data_url"] = f"data:image/webp;base64,{base64.b64encode(webp_bytes).decode('ascii')}"
 
     return result
@@ -613,20 +699,29 @@ def click(
     ensure_default_desktop()
     target_hwnd = hwnd or user32.GetForegroundWindow()
 
+    # Automatically ensure target window is in the foreground
+    if target_hwnd and user32.GetForegroundWindow() != target_hwnd:
+        focus_window(hwnd=target_hwnd)
+
     # 1. Deterministic UI Automation element click
     if element_index is not None and element_index in _element_cache:
         ctrl = _element_cache[element_index]
-        try:
-            # Try InvokePattern first for instant deterministic execution
-            invoke_pat = ctrl.GetInvokePattern()
-            if invoke_pat:
-                invoke_pat.Invoke()
-                return {"success": True, "method": "uia_invoke", "element_index": element_index}
-        except Exception:
-            pass
+
+        # Only attempt InvokePattern for single left-click
+        if button.lower() == "left" and click_count == 1:
+            try:
+                invoke_pat = ctrl.GetInvokePattern()
+                if invoke_pat:
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        fut = executor.submit(invoke_pat.Invoke)
+                        fut.result(timeout=1.0)
+                    return {"success": True, "method": "uia_invoke", "element_index": element_index}
+            except Exception:
+                pass
 
         try:
-            # Fall back to hardware click on element's center
+            # Fall back to hardware click on element's center (required for right-click, double-click, etc.)
             rect = ctrl.BoundingRectangle
             cx = (rect.left + rect.right) // 2
             cy = (rect.top + rect.bottom) // 2
@@ -654,6 +749,11 @@ def type_text(
 ) -> dict[str, Any]:
     """Types text using Unicode SendInput or sets UIA ValuePattern directly."""
     ensure_default_desktop()
+    target_hwnd = hwnd or user32.GetForegroundWindow()
+
+    # Automatically ensure target window is in the foreground
+    if target_hwnd and user32.GetForegroundWindow() != target_hwnd:
+        focus_window(hwnd=target_hwnd)
 
     # Direct UIA value replacement if element supported
     if element_index is not None and element_index in _element_cache:
@@ -661,65 +761,97 @@ def type_text(
         try:
             val_pat = ctrl.GetValuePattern()
             if val_pat:
-                val_pat.SetValue(text)
+                if clear_first:
+                    val_pat.SetValue(text)
+                else:
+                    curr_val = val_pat.Value or ""
+                    val_pat.SetValue(curr_val + text)
                 return {"success": True, "method": "uia_set_value", "element_index": element_index}
         except Exception:
             pass
 
     # Fallback to hardware Unicode typing
     if clear_first:
-        press_key("ctrl+a", hwnd=hwnd)
-        press_key("backspace", hwnd=hwnd)
+        press_key("ctrl+a", hwnd=target_hwnd)
+        press_key("backspace", hwnd=target_hwnd)
 
     for char in text:
-        code = ord(char)
-        down = INPUT(type=INPUT_KEYBOARD)
-        down.union.ki.wScan = code
-        down.union.ki.dwFlags = KEYEVENTF_UNICODE
-        up = INPUT(type=INPUT_KEYBOARD)
-        up.union.ki.wScan = code
-        up.union.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP
-        _send_inputs([down, up])
-        time.sleep(0.005)
+        if char in ("\n", "\r"):
+            press_key("enter", hwnd=target_hwnd)
+            time.sleep(0.01)
+        else:
+            # Encode in UTF-16 LE code units to support surrogate pairs for emojis
+            utf16_bytes = char.encode("utf-16-le")
+            for i in range(0, len(utf16_bytes), 2):
+                code_unit = int.from_bytes(utf16_bytes[i:i+2], "little")
+                down = INPUT(type=INPUT_KEYBOARD)
+                down.union.ki.wScan = code_unit
+                down.union.ki.dwFlags = KEYEVENTF_UNICODE
+                up = INPUT(type=INPUT_KEYBOARD)
+                up.union.ki.wScan = code_unit
+                up.union.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP
+                _send_inputs([down, up])
+                time.sleep(0.005)
 
     return {"success": True, "method": "sendinput_unicode", "char_count": len(text)}
 
 
 def press_key(keys: str, hwnd: int | None = None) -> dict[str, Any]:
-    """Presses key combination (e.g. 'ctrl+c', 'alt+f4', 'win+r', 'enter')."""
+    """Presses key combination (e.g. 'ctrl+c', 'alt+f4', 'win+r', 'enter', 'ctrl+,')."""
     ensure_default_desktop()
+    target_hwnd = hwnd or user32.GetForegroundWindow()
+
+    # Automatically ensure target window is in the foreground
+    if target_hwnd and user32.GetForegroundWindow() != target_hwnd:
+        focus_window(hwnd=target_hwnd)
+
     parts = [k.strip().lower() for k in keys.split("+") if k.strip()]
     if not parts:
         raise ValueError("Combinaison de touches vide.")
 
-    vk_codes: list[int] = []
+    vk_entries: list[tuple[int, bool]] = []
     for part in parts:
         if part in VK_MAP:
-            vk_codes.append(VK_MAP[part])
+            vk = VK_MAP[part]
+            vk_entries.append((vk, vk in EXTENDED_VKEYS))
         elif len(part) == 1:
-            vk_codes.append(ord(part.upper()))
+            if part.isalnum():
+                vk_entries.append((ord(part.upper()), False))
+            else:
+                # Map non-alphanumeric punctuation/symbols via VkKeyScanW
+                vk_scan = user32.VkKeyScanW(ord(part))
+                if vk_scan != -1:
+                    vk = vk_scan & 0xFF
+                    vk_entries.append((vk, vk in EXTENDED_VKEYS))
+                else:
+                    vk_entries.append((ord(part.upper()), False))
         else:
             raise ValueError(f"Touche inconnue : {part}")
 
     # Press keys in sequence
     down_inputs = []
-    for vk in vk_codes:
+    for vk, is_ext in vk_entries:
         inp = INPUT(type=INPUT_KEYBOARD)
         inp.union.ki.wVk = vk
+        flags = KEYEVENTF_EXTENDEDKEY if is_ext else 0
+        inp.union.ki.dwFlags = flags
         down_inputs.append(inp)
     _send_inputs(down_inputs)
     time.sleep(0.03)
 
     # Release keys in reverse sequence
     up_inputs = []
-    for vk in reversed(vk_codes):
+    for vk, is_ext in reversed(vk_entries):
         inp = INPUT(type=INPUT_KEYBOARD)
         inp.union.ki.wVk = vk
-        inp.union.ki.dwFlags = KEYEVENTF_KEYUP
+        flags = KEYEVENTF_KEYUP
+        if is_ext:
+            flags |= KEYEVENTF_EXTENDEDKEY
+        inp.union.ki.dwFlags = flags
         up_inputs.append(inp)
     _send_inputs(up_inputs)
 
-    return {"success": True, "keys": keys, "vk_codes": vk_codes}
+    return {"success": True, "keys": keys, "vk_codes": [v[0] for v in vk_entries]}
 
 
 def scroll(

@@ -19,7 +19,13 @@ STATUS_URL = "http://127.0.0.1:9225/api/status"
 
 sys.path.insert(0, str(NATIVE_HOST_DIRECTORY))
 
-from bridge_security import TOKEN_HEADER, load_or_create_token  # noqa: E402
+try:
+    from bridge_security import TOKEN_HEADER, load_or_create_token  # noqa: E402
+except ImportError:
+    TOKEN_HEADER = "X-Nexus-Token"
+
+    def load_or_create_token() -> str:
+        return ""
 
 
 def authentication_headers() -> dict[str, str]:

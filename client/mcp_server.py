@@ -463,11 +463,13 @@ def computer_get_window_state(
     max_elements: int = 50,
     capture_screenshot: bool = False,
     output_path: str | None = None,
+    max_depth: int = 30,
 ) -> str:
     """Extrait l'état complet de la fenêtre ciblée (ou fenêtre active) :
     - Arbre UI Automation compact avec marqueurs Set-of-Marks [#1], [#2]...
     - Type de contrôle, libellé textuel, valeur actuelle, centre relatif et coordonnées spatiales Gemini box_2d [ymin, xmin, ymax, xmax] (0-1000).
     - Capture WebP haute résolution compressée sous 200 Ko (Règle Anti-Crash 400 garantie) si capture_screenshot=True ou output_path fourni.
+    - Profondeur max d'exploration UIA (max_depth=30 par défaut avec budget temps 1.618s et élagage spatial).
     """
     return _format_computer_result(
         computer_client.get_window_state,
@@ -475,6 +477,7 @@ def computer_get_window_state(
         max_elements=max_elements,
         capture_screenshot=capture_screenshot,
         output_path=output_path,
+        max_depth=max_depth,
     )
 
 
@@ -578,19 +581,31 @@ def computer_take_screenshot(
     output_path: str | None = None,
 ) -> str:
     """Prend une capture d'écran de la fenêtre ciblée ou du bureau complet Windows.
-    Garantie Anti-Crash 400 : compressée en WebP sous 200 Ko, enregistrée vers output_path ou renvoyée en dataUrl.
+    Garantie Anti-Crash 400 : compressée en WebP sous 200 Ko, enregistrée vers output_path ou cache local.
     """
 
     def _action() -> dict[str, Any]:
-        data_bytes = computer_client.capture_window_image(hwnd=hwnd, full_screen=full_screen)
-        if output_path:
-            dest = Path(output_path).expanduser().resolve()
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(data_bytes)
-            return {"output_path": str(dest), "size_bytes": len(data_bytes)}
+        import time
+
+        data_bytes, meta = computer_client.capture_window_image(
+            hwnd=hwnd, full_screen=full_screen, return_meta=True
+        )
+        dest_path = output_path
+        if not dest_path:
+            cache_dir = Path.home() / ".nexusagy" / "screenshots"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = int(time.time() * 1000)
+            dest_path = str(cache_dir / f"screenshot_{timestamp}.webp")
+
+        dest = Path(dest_path).expanduser().resolve()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data_bytes)
         return {
-            "screenshot_data_url": f"data:image/webp;base64,{base64.b64encode(data_bytes).decode('ascii')}",
+            "output_path": str(dest),
             "size_bytes": len(data_bytes),
+            "dimensions": meta.get("captured_size"),
+            "original_bounds": meta.get("original_bounds"),
+            "scale_factor": meta.get("scale_factor"),
         }
 
     return _format_computer_result(_action)
