@@ -26,6 +26,11 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
   - Activation et mise au premier plan automatique de la fenêtre cible lorsque `hwnd` est spécifié et non actif.
   - Prise en charge multi-écrans sans troncature à zéro et enregistrement des captures d'écran dans le cache local `~/.nexusagy/screenshots/` par défaut pour préserver la fenêtre de contexte textuel et éliminer le bruit base64.
 
+### Ajouté
+- **Retransmission Visuelle Set-of-Marks (`annotate_screenshot=True`)** : Tracé Stanford-style des rectangles englobants et badges numérotés `[#N]` directement sur les captures WebP (< 200 Ko).
+- **Déplacement Fluide de Souris (`mouse_move(x, y, smooth=True)`)** : Trajectoire paramétrique ease-in-out pour survol naturel des éléments sans téléportation abrupte.
+- **Rétention Circulaire du Cache de Captures (`cleanup_screenshot_cache`)** : Purge automatique configurable des captures locales (`max_files=50`, `max_age_hours=24.0`) évitant toute accumulation inutile sur disque.
+
 ## [2.0.0] - 2026-10-09
 
 ### Ajouté

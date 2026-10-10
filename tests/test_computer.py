@@ -130,3 +130,26 @@ def test_dwm_bounds_accurate():
         rect = computer_client.get_window_rect(windows[0]["hwnd"])
         assert rect["width"] > 0
         assert rect["height"] > 0
+
+
+def test_mouse_move_smooth():
+    res = computer_client.mouse_move(x=10, y=10, smooth=True, steps=3, duration_ms=10)
+    assert res["success"] is True
+    assert res["smooth"] is True
+
+
+def test_cleanup_screenshot_cache():
+    cleaned = computer_client.cleanup_screenshot_cache(max_files=100, max_age_hours=48.0)
+    assert isinstance(cleaned, int)
+    assert cleaned >= 0
+
+
+def test_annotate_screenshot_som():
+    windows = computer_client.list_windows(visible_only=True)
+    if windows:
+        target = windows[0]["hwnd"]
+        state = computer_client.get_window_state(
+            hwnd=target, max_elements=5, capture_screenshot=True, annotate_screenshot=True
+        )
+        assert state["hwnd"] == target
+        assert "screenshot_path" in state

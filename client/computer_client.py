@@ -424,16 +424,36 @@ def focus_window(
 # -----------------------------------------------------------------------------
 # Screen & Window Capture (Anti-Crash 400 Guaranteed < 200 KB)
 # -----------------------------------------------------------------------------
+def cleanup_screenshot_cache(max_files: int = 50, max_age_hours: float = 24.0) -> int:
+    """Prunes older WebP screenshots from ~/.nexusagy/screenshots to prevent disk bloat."""
+    cache_dir = Path.home() / ".nexusagy" / "screenshots"
+    if not cache_dir.exists():
+        return 0
+    try:
+        files = sorted(cache_dir.glob("*.webp"), key=lambda p: p.stat().st_mtime)
+        now = time.time()
+        deleted = 0
+        for f in files:
+            age_h = (now - f.stat().st_mtime) / 3600.0
+            if (len(files) - deleted) > max_files or age_h > max_age_hours:
+                f.unlink(missing_ok=True)
+                deleted += 1
+        return deleted
+    except Exception:
+        return 0
+
+
 def capture_window_image(
     hwnd: int | None = None,
     full_screen: bool = False,
     max_dimension: int = 1280,
     quality: int = 85,
     return_meta: bool = False,
+    elements_to_annotate: list[dict[str, Any]] | None = None,
 ) -> bytes | tuple[bytes, dict[str, Any]]:
     """Captures the target window or full screen and compresses to WebP (< 200 KB).
 
-    Supports multi-monitor desktop setups and negative coordinates.
+    Supports multi-monitor desktop setups, negative coordinates, and visual Set-of-Marks overlay.
     """
     ensure_default_desktop()
     if not hwnd and not full_screen:
@@ -459,6 +479,26 @@ def capture_window_image(
 
         # Resize to maintain aspect ratio under max_dimension
         img.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
+
+        # Visual Set-of-Marks overlay annotations (Stanford SoM style)
+        if elements_to_annotate:
+            try:
+                from PIL import ImageDraw
+                draw = ImageDraw.Draw(img)
+                for el in elements_to_annotate:
+                    box = el.get("gemini_box_2d")
+                    if box and len(box) == 4:
+                        ymin, xmin, ymax, xmax = box
+                        left = int(xmin / 1000.0 * img.width)
+                        top = int(ymin / 1000.0 * img.height)
+                        right = int(xmax / 1000.0 * img.width)
+                        bottom = int(ymax / 1000.0 * img.height)
+                        draw.rectangle([left, top, right, bottom], outline=(255, 60, 60), width=1)
+                        badge_w = 16 if el["index"] < 10 else 22
+                        draw.rectangle([left, max(0, top - 11), min(img.width, left + badge_w), top], fill=(255, 60, 60))
+                        draw.text((left + 2, max(0, top - 11)), str(el["index"]), fill=(255, 255, 255))
+            except Exception:
+                pass
 
         buf = io.BytesIO()
         img.save(buf, format="WEBP", quality=quality, method=4)
@@ -509,11 +549,12 @@ def get_window_state(
     max_depth: int = 30,
     time_budget: float = 1.618,
     include_data_url: bool = False,
+    annotate_screenshot: bool = False,
 ) -> dict[str, Any]:
     """Extracts compact UI Automation interactive elements and optional WebP screenshot.
 
     Equips Antigravity with Set-of-Marks markers [#1], [#2] and Gemini box_2d coordinates.
-    Bounded by max_depth and a harmonic time budget (1.618s) with spatial pruning.
+    Bounded by max_depth and a harmonic time budget (1.618s) with spatial pruning and optional visual SoM overlay.
     """
     global _element_cache, _cached_window_hwnd
     ensure_default_desktop()
@@ -620,7 +661,10 @@ def get_window_state(
     }
 
     if capture_screenshot or output_path:
-        webp_bytes, meta = capture_window_image(target_hwnd, return_meta=True)
+        annotate_list = elements if annotate_screenshot else None
+        webp_bytes, meta = capture_window_image(
+            target_hwnd, return_meta=True, elements_to_annotate=annotate_list
+        )
         result["image_dimensions"] = meta.get("captured_size")
         result["scale_factor"] = meta.get("scale_factor")
 
@@ -628,6 +672,7 @@ def get_window_state(
         if not dest_path:
             cache_dir = Path.home() / ".nexusagy" / "screenshots"
             cache_dir.mkdir(parents=True, exist_ok=True)
+            cleanup_screenshot_cache(max_files=50, max_age_hours=24.0)
             timestamp = int(time.time() * 1000)
             dest_path = str(cache_dir / f"window_state_{timestamp}.webp")
 
@@ -685,6 +730,42 @@ def mouse_click(
             time.sleep(0.05)
 
     return True
+
+
+def mouse_move(
+    x: int,
+    y: int,
+    hwnd: int | None = None,
+    smooth: bool = True,
+    steps: int = 12,
+    duration_ms: int = 40,
+) -> dict[str, Any]:
+    """Moves mouse cursor to window-relative coordinates (x, y) with smooth Bézier/easing trajectory."""
+    ensure_default_desktop()
+    target_hwnd = hwnd or user32.GetForegroundWindow()
+    win_rect = get_window_rect(target_hwnd)
+    target_screen_x = win_rect["left"] + x
+    target_screen_y = win_rect["top"] + y
+
+    if not smooth or steps <= 1:
+        user32.SetCursorPos(target_screen_x, target_screen_y)
+        return {"success": True, "target": (x, y), "screen_coords": (target_screen_x, target_screen_y), "smooth": False}
+
+    pt = POINT()
+    user32.GetCursorPos(ctypes.byref(pt))
+    start_x, start_y = pt.x, pt.y
+    step_delay = (duration_ms / 1000.0) / max(1, steps)
+
+    for i in range(1, steps + 1):
+        t = i / steps
+        # Smooth step ease-in-out: 3*t^2 - 2*t^3
+        ease = 3 * (t ** 2) - 2 * (t ** 3)
+        cur_x = int(start_x + (target_screen_x - start_x) * ease)
+        cur_y = int(start_y + (target_screen_y - start_y) * ease)
+        user32.SetCursorPos(cur_x, cur_y)
+        time.sleep(step_delay)
+
+    return {"success": True, "target": (x, y), "screen_coords": (target_screen_x, target_screen_y), "smooth": True}
 
 
 def click(
