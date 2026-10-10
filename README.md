@@ -4,13 +4,13 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://python.org)
 [![Model Context Protocol](https://img.shields.io/badge/MCP-FastMCP-FF6F00?logo=anthropic&logoColor=white)](https://modelcontextprotocol.io/)
 [![UI Automation 3.0](https://img.shields.io/badge/Engine-UI%20Automation%203.0-4285F4)](https://learn.microsoft.com/windows/win32/winauto/entry-uiauto-win32)
-[![Zero Focus Theft](https://img.shields.io/badge/Focus%20Theft-0%20ms%20(Background--First)-2ea44f)](https://github.com/pironjulien/antigravity-computer-use)
+[![Ultra-Low Latency Focus Guard](https://img.shields.io/badge/Focus%20Guard-10--50%20ms%20WinEventHook-2ea44f)](https://github.com/pironjulien/antigravity-computer-use)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Author](https://img.shields.io/badge/Author-Julien%20Piron-10a37f)](https://julienpiron.fr)
 
 > **SOTA Background-First Windows OS Automation Engine & Global Desktop Spotlight Companion (`Alt + Space`) for AI Agents (Anthropic Claude Code, OpenAI Codex, Claude Desktop, and Google Antigravity).**
 >
-> 🚀 **Operate desktop apps in the background with zero cursor movement and 0 ms focus theft.**
+> 🚀 **Operate desktop apps in the background with zero cursor movement, asynchronous Z-order preservation, and ultra-low latency focus restoration (10–50 ms Win32 pulse restored via WinEventHook).**
 
 ---
 
@@ -18,7 +18,7 @@
 
 ![Antigravity Computer Use Studio Demo](assets/demo.webp)
 
-*The target window is operated silently in the background via UI Automation patterns (`TogglePattern`, `ValuePattern`, `InvokePattern`) and offscreen GDI buffers while the user's foreground focus and physical mouse cursor remain 100% uninterrupted.*
+*The target window is operated silently in the background via UI Automation patterns (`TogglePattern`, `ValuePattern`, `InvokePattern`) and offscreen GDI buffers while the user's foreground focus and physical mouse cursor remain uninterrupted.*
 
 ---
 
@@ -29,7 +29,7 @@ Why does every current major desktop AI agent hijack your mouse and steal your s
 | Capability | Anthropic Claude Desktop (`@anthropic/computer-use`) | OpenAI Codex / ChatGPT Desktop (`@oai/sky`) | **Antigravity Computer Use (`nexus-computer`)** |
 | :--- | :--- | :--- | :--- |
 | **Windows Background Execution** | ❌ **Disabled on Windows** (`if (process.platform !== "darwin") return !1;`) | ❌ **No Desktop Background** (Web only via headless `iab`; GUI apps hijack foreground) | ✅ **100% Native Background-First** |
-| **User Focus Theft** | ⚠️ **100% Focus Stolen** (Requires target on top) | ⚠️ **100% Focus Stolen** (Hardcoded `SetForegroundWindow` on every click) | ⚡ **0 ms Focus Theft** (Background UIA patterns preserve active work) |
+| **User Focus Theft** | ⚠️ **100% Focus Stolen** (Requires target on top) | ⚠️ **100% Focus Stolen** (Hardcoded `SetForegroundWindow` on every click) | ⚡ **10–50 ms Win32 pulse restored via WinEventHook** (Z-order preserved via `SetWindowPos`) |
 | **Mouse Cursor Hijacking** | ⚠️ **Physical Cursor Moved** (Steals user's mouse) | ⚠️ **Physical Cursor Moved** (`SendInput` at screen coordinates) | 🟢 **Zero Mouse Movement** (Deterministic element invocation) |
 | **Control Targeting Method** | 👁️ Visual coordinate guessing | 👁️ Visual coordinate guessing | 🎯 **Deterministic UI Automation 3.0 + Set-of-Marks `[#1..#N]`** |
 | **Occluded / Hidden Window Capture** | ❌ Fails if occluded by other windows | ❌ Fails if occluded by other windows | 📸 **Offscreen GDI Buffer** (`PrintWindow` `PW_RENDERFULLCONTENT`) |

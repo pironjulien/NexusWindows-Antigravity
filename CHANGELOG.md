@@ -4,6 +4,35 @@ Toutes les modifications notables apportées au projet **Antigravity Computer Us
 
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/), et ce projet adhère au versioning sémantique.
 
+## [2.3.0] - 2026-10-10
+
+### Ajouté
+- **Garde Asynchrone du Premier Plan (*ForegroundGuard*) (`engine.py`, `server.py`)** :
+  - Crochet Win32 `SetWinEventHook(EVENT_SYSTEM_FOREGROUND)` surveillant le premier plan en asynchrone : restitution du focus à la fenêtre active de Julien en 10 à 50 ms (au lieu de 600 ms).
+  - Respect absolu de la saisie utilisateur (`GetLastInputInfo`) : si Julien clique ou tape au clavier pendant une action, le serveur cède immédiatement la main sans contrarier l'utilisateur.
+  - Restauration de la profondeur d'empilement (*Z-Order Restoration*) : la fenêtre cible est replacée sous la fenêtre active d'origine via `SetWindowPos(SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS)`.
+- **Badges Harmoniques Set-of-Marks au Nombre d'Or ($\phi \approx 1,618$) (`engine.py`)** :
+  - Transparence $\alpha = 255/\phi \approx 158$ laissant transparaître le texte sous le badge.
+  - Chiffres cernés d'un contour sombre (`stroke_width=1`) pour une lisibilité parfaite sur fond clair ou sombre.
+  - Algorithme d'agencement priorisant les plus petits éléments pour éviter tout chevauchement de numéros sur des boutons contigus.
+  - Suppression automatique des contours rouges sur les grands conteneurs (> $1/\phi^2 \approx 38\%$ de la surface).
+- **Suite de Tests Élargie (62 tests unitaires + 22 vérifications réelles en arrière-plan)** :
+  - 45 tests unitaires complets dans `tests/test_engine.py`.
+  - Test en direct sans souris ni clavier `tests/live_background.py` (22/22 vérifications réussies).
+  - Script d'application de test dédiée avec ouverture au fond de la pile `tests/target_app.ps1 -Behind`.
+
+### Modifié
+- **Élimination de la Latence Artificielle UI Automation (`waitTime=0`) (`engine.py`)** :
+  - Suppression de l'attente par défaut de 0,5 s imposée par le paquet `uiautomation` sur `Invoke`, `Toggle`, `Select`, `Expand`, `Collapse`, `Scroll` et `SetValue`, ramenant le temps d'exécution au niveau matériel réel.
+- **Descriptions MCP Allégées (`server.py`)** :
+  - Synthèse des consignes communes évitant la saturation de tokens dans les invites système de Codex, Claude et Antigravity.
+
+### Corrigé
+- **Préservation des Retours à la Ligne Multilignes (*RichEdit Fix by Codex*) (`engine.py`)** :
+  - Correction de la suppression aveugle de fin de ligne : seule la marque de paragraphe synthétique `\r` propre aux contrôles Win32 RichEdit est éliminée, préservant fidèlement les sauts de ligne intentionnels dans les champs de saisie multilignes standards.
+- **Filtrage des Doublons Agrandir/Restaurer (`engine.py`)** :
+  - Exclusion des éléments hors de la vue contrôle de UI Automation (`IsControlElement=False`), résolvant la superposition des boutons de titre masqués.
+
 ## [2.2.0] - 2026-10-10
 
 ### Ajouté
