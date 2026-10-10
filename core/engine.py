@@ -16,6 +16,7 @@ import threading
 import time
 from ctypes import wintypes
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Self
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -84,6 +85,10 @@ class _INPUTUNION(ctypes.Union):
 
 class INPUT(ctypes.Structure):
     _fields_ = [("type", DWORD), ("u", _INPUTUNION)]
+
+    @property
+    def union(self) -> _INPUTUNION:
+        return self.u
 
 
 class LASTINPUTINFO(ctypes.Structure):
@@ -273,23 +278,33 @@ def window_pid(hwnd: int) -> int:
 
 
 _process_names: dict[int, str] = {}
+_process_paths: dict[int, str] = {}
 
 
 def process_name(pid: int) -> str:
     if pid in _process_names:
         return _process_names[pid]
     name = "?"
+    path = ""
     process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
     if process:
         try:
             buffer = ctypes.create_unicode_buffer(1024)
             size = DWORD(1024)
             if QueryFullProcessImageNameW(process, 0, buffer, ctypes.byref(size)):
-                name = os.path.basename(buffer.value)
+                path = buffer.value
+                name = os.path.basename(path)
         finally:
             CloseHandle(process)
     _process_names[pid] = name
+    _process_paths[pid] = path
     return name
+
+
+def process_path(pid: int) -> str:
+    if pid not in _process_paths:
+        process_name(pid)
+    return _process_paths.get(pid, "")
 
 
 def process_elevated(pid: int) -> bool | None:
@@ -345,7 +360,63 @@ def describe(hwnd: int) -> str:
     return f"« {window_title(hwnd)} » ({process_name(window_pid(hwnd))}, hwnd {hwnd})"
 
 
-def list_windows() -> list[dict[str, Any]]:
+class WindowBounds(tuple):
+    """Window geometry tuple (left, top, width, height) supporting dict indexing and attribute access."""
+
+    def __new__(cls, left: int = 0, top: int = 0, width: int = 0, height: int = 0) -> WindowBounds:
+        return super().__new__(cls, (left, top, width, height))
+
+    @property
+    def left(self) -> int:
+        return self[0]
+
+    @property
+    def top(self) -> int:
+        return self[1]
+
+    @property
+    def width(self) -> int:
+        return self[2]
+
+    @property
+    def height(self) -> int:
+        return self[3]
+
+    @property
+    def right(self) -> int:
+        return self[0] + self[2]
+
+    @property
+    def bottom(self) -> int:
+        return self[1] + self[3]
+
+    def __getitem__(self, key: Any) -> Any:
+        if isinstance(key, str):
+            if key == "left":
+                return self.left
+            if key == "top":
+                return self.top
+            if key == "width":
+                return self.width
+            if key == "height":
+                return self.height
+            if key == "right":
+                return self.right
+            if key == "bottom":
+                return self.bottom
+            raise KeyError(key)
+        return super().__getitem__(key)
+
+    def __contains__(self, key: Any) -> bool:
+        if isinstance(key, str):
+            return key in ("left", "top", "width", "height", "right", "bottom")
+        return super().__contains__(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default) if key in self else default
+
+
+def list_windows(visible_only: bool = True) -> list[dict[str, Any]]:
     """Top-level application windows in Z-order (frontmost first)."""
     ensure_default_desktop()
     windows: list[dict[str, Any]] = []
@@ -353,28 +424,36 @@ def list_windows() -> list[dict[str, Any]]:
 
     def visit(raw_hwnd: Any, _: Any) -> bool:
         hwnd = _handle(raw_hwnd)
-        if not IsWindowVisible(hwnd) or is_cloaked(hwnd):
+        if visible_only and (not IsWindowVisible(hwnd) or is_cloaked(hwnd)):
             return True
         title = window_title(hwnd)
         style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
-        if not title or (style & WS_EX_TOOLWINDOW and not style & WS_EX_APPWINDOW):
+        if visible_only and (not title or (style & WS_EX_TOOLWINDOW and not style & WS_EX_APPWINDOW)):
             return True
-        if window_class(hwnd) in _SHELL_CLASSES:
+        if visible_only and window_class(hwnd) in _SHELL_CLASSES:
             return True
         minimized = bool(IsIconic(hwnd))
         left, top, right, bottom = frame_bounds(hwnd)
-        if not minimized and (right - left < 20 or bottom - top < 20):
+        w, h = max(0, right - left), max(0, bottom - top)
+        if visible_only and not minimized and (w < 10 or h < 10):
             return True
         pid = window_pid(hwnd)
+        pname = process_name(pid)
+        ppath = process_path(pid)
+        wb = None if minimized else WindowBounds(left, top, w, h)
         windows.append(
             {
                 "hwnd": hwnd,
                 "title": title,
-                "process": process_name(pid),
+                "process": pname,
+                "process_name": pname,
+                "process_path": ppath,
                 "pid": pid,
+                "process_id": pid,
                 "state": "réduite" if minimized else "agrandie" if IsZoomed(hwnd) else "normale",
                 "foreground": hwnd == active,
-                "bounds": None if minimized else (left, top, right - left, bottom - top),
+                "is_foreground": hwnd == active,
+                "bounds": wb,
             }
         )
         return True
@@ -384,6 +463,28 @@ def list_windows() -> list[dict[str, Any]]:
     if not windows and _hdesk_default:
         EnumDesktopWindows(_hdesk_default, proc, 0)
     return windows
+
+
+def list_apps() -> list[dict[str, Any]]:
+    """Lists active graphical applications grouped by executable name."""
+    windows = list_windows(visible_only=True)
+    apps_map: dict[str, dict[str, Any]] = {}
+
+    for w in windows:
+        pname = w["process_name"]
+        if pname not in apps_map:
+            apps_map[pname] = {
+                "process_name": pname,
+                "process_id": w["process_id"],
+                "process_path": w["process_path"],
+                "main_window": w,
+                "window_count": 0,
+                "windows": [],
+            }
+        apps_map[pname]["window_count"] += 1
+        apps_map[pname]["windows"].append({"hwnd": w["hwnd"], "title": w["title"], "bounds": w["bounds"]})
+
+    return list(apps_map.values())
 
 
 def find_window(title: str | None = None, process: str | None = None) -> int:
@@ -1323,19 +1424,68 @@ def scroll_at(x: int, y: int, direction: str, amount: int) -> None:
         time.sleep(0.02)
 
 
-def drag(start: tuple[int, int], end: tuple[int, int], steps: int = 20) -> None:
-    down, up = _BUTTONS["left"]
-    move_cursor(*start)
-    _send(_mouse_input(down))
-    time.sleep(0.08)
-    for step in range(1, steps + 1):
-        SetCursorPos(
-            round(start[0] + (end[0] - start[0]) * step / steps), round(start[1] + (end[1] - start[1]) * step / steps)
+def drag(
+    start: tuple[int, int] | int,
+    end: tuple[int, int] | int | None = None,
+    steps: int = 12,
+    to_x: int | None = None,
+    to_y: int | None = None,
+    hwnd: int | None = None,
+    delay_ms: int = 15,
+    foreground: bool = False,
+    **kwargs: Any,
+) -> Any:
+    """Performs a smooth mouse drag between two coordinates.
+
+    Supports both Claude tuple signature (start=(x1, y1), end=(x2, y2), steps=20)
+    and Antigravity signature (from_x, from_y, to_x, to_y, hwnd=..., steps=12).
+    """
+    if isinstance(start, (tuple, list)) and isinstance(end, (tuple, list)):
+        down, up = _BUTTONS["left"]
+        move_cursor(*start)
+        _send(_mouse_input(down))
+        time.sleep(0.08)
+        for step in range(1, steps + 1):
+            SetCursorPos(
+                round(start[0] + (end[0] - start[0]) * step / steps),
+                round(start[1] + (end[1] - start[1]) * step / steps),
+            )
+            _send(_mouse_input(MOUSEEVENTF_MOVE))
+            time.sleep(0.012)
+        time.sleep(0.05)
+        _send(_mouse_input(up))
+        return None
+
+    ensure_default_desktop()
+    from_x = int(start)
+    from_y = int(end if end is not None else 0)
+    target_to_x = int(to_x if to_x is not None else from_x)
+    target_to_y = int(to_y if to_y is not None else from_y)
+
+    target_hwnd = hwnd or foreground()
+    if target_hwnd and foreground() != target_hwnd and not foreground:
+        raise ComputerError(
+            "Le glisser-déposer à la souris requiert la mise au premier plan. "
+            "Pour ne pas interrompre le travail de Julien, passez foreground=True."
         )
-        _send(_mouse_input(MOUSEEVENTF_MOVE))
-        time.sleep(0.012)
-    time.sleep(0.05)
+    win_rect = get_window_rect(target_hwnd)
+    s_from_x = win_rect["left"] + from_x
+    s_from_y = win_rect["top"] + from_y
+    s_to_x = win_rect["left"] + target_to_x
+    s_to_y = win_rect["top"] + target_to_y
+
+    move_cursor(s_from_x, s_from_y)
+    down, up = _BUTTONS["left"]
+    _send(_mouse_input(down))
+    time.sleep(0.02)
+    for i in range(1, steps + 1):
+        cur_x = int(s_from_x + (s_to_x - s_from_x) * (i / steps))
+        cur_y = int(s_from_y + (s_to_y - s_from_y) * (i / steps))
+        SetCursorPos(cur_x, cur_y)
+        if delay_ms > 0:
+            time.sleep(delay_ms / 1000.0)
     _send(_mouse_input(up))
+    return {"success": True, "from": (from_x, from_y), "to": (target_to_x, target_to_y), "steps": steps}
 
 
 # -----------------------------------------------------------------------------
@@ -1408,3 +1558,657 @@ def type_unicode(text: str) -> None:
             units = utf16_units(char)
             _send(*(item for unit in units for item in (_unicode_input(unit, False), _unicode_input(unit, True))))
             time.sleep(0.004)
+
+
+# -----------------------------------------------------------------------------
+# Unified Antigravity & High-Level UIA Engine Primitives
+# -----------------------------------------------------------------------------
+_element_cache: dict[int, Any] = {}
+_cached_window_hwnd: int = 0
+_cache_generation: float = 0.0
+
+
+def get_window_rect(hwnd: int) -> dict[str, int]:
+    """Retrieves visible bounding rectangle of a window."""
+    left, top, right, bottom = frame_bounds(hwnd)
+    return {
+        "left": left,
+        "top": top,
+        "right": right,
+        "bottom": bottom,
+        "width": max(0, right - left),
+        "height": max(0, bottom - top),
+    }
+
+
+def focus_window(
+    hwnd: int | None = None,
+    title: str | None = None,
+    process_name_filter: str | None = None,
+) -> dict[str, Any]:
+    """Brings the target application window to the foreground and restores if minimized."""
+    ensure_default_desktop()
+    target_hwnd = hwnd
+    if not target_hwnd:
+        target_hwnd = find_window(title=title, process=process_name_filter)
+    if not target_hwnd or not IsWindow(target_hwnd):
+        raise ComputerError("Fenêtre introuvable avec les critères spécifiés.")
+    success = bring_to_front(target_hwnd)
+    pid = window_pid(target_hwnd)
+    return {
+        "hwnd": target_hwnd,
+        "title": window_title(target_hwnd),
+        "process_name": process_name(pid) if pid else "",
+        "success": success,
+    }
+
+
+def _send_inputs(inputs: list[INPUT]) -> int:
+    """Dispatches a list of INPUT structures to the OS."""
+    ensure_default_desktop()
+    n = len(inputs)
+    arr = (INPUT * n)(*inputs)
+    return user32.SendInput(n, arr, ctypes.sizeof(INPUT))
+
+
+def is_point_occluded(x: int, y: int, target_hwnd: int) -> bool:
+    """Checks whether the screen coordinate (x, y) is covered by another top-level window."""
+    if not target_hwnd:
+        return False
+    pt = POINT(x, y)
+    hit = _handle(WindowFromPoint(pt))
+    if not hit:
+        return False
+    hit_root = _handle(GetAncestor(hit, GA_ROOT))
+    target_root = _handle(GetAncestor(target_hwnd, GA_ROOT))
+    return hit != target_hwnd and hit_root != target_root and hit_root != target_hwnd
+
+
+def capture_window_background_gdi(hwnd: int) -> Image.Image | None:
+    """Captures a window surface directly in memory via PrintWindow without bringing it to front."""
+    if not hwnd or not IsWindow(hwnd) or IsIconic(hwnd):
+        return None
+    rect = RECT()
+    GetWindowRect(hwnd, ctypes.byref(rect))
+    w = rect.right - rect.left
+    h = rect.bottom - rect.top
+    if w <= 0 or h <= 0:
+        return None
+
+    hdc_screen = GetDC(0)
+    hdc_mem = CreateCompatibleDC(hdc_screen)
+    hbm = CreateCompatibleBitmap(hdc_screen, w, h)
+    prev = SelectObject(hdc_mem, hbm)
+    try:
+        res = PrintWindow(hwnd, hdc_mem, PW_RENDERFULLCONTENT)
+        if not res:
+            return None
+        buf = ctypes.create_string_buffer(w * h * 4)
+        GetBitmapBits(hbm, len(buf), buf)
+        img = Image.frombuffer("RGB", (w, h), buf, "raw", "BGRX", 0, 1)
+
+        stat = ImageStat.Stat(img.convert("L"))
+        if stat.stddev[0] < 2.0:
+            return None
+        return img
+    except Exception:
+        return None
+    finally:
+        SelectObject(hdc_mem, prev)
+        DeleteObject(hbm)
+        DeleteDC(hdc_mem)
+        ReleaseDC(0, hdc_screen)
+
+
+def capture_window_image(
+    hwnd: int | None = None,
+    full_screen: bool = False,
+    max_dimension: int = 1568,
+    quality: int = 80,
+    return_meta: bool = False,
+    elements_to_annotate: list[dict[str, Any]] | None = None,
+) -> tuple[bytes, dict[str, Any]] | bytes:
+    """Captures a window or full screen with adaptive WebP compression guaranteed < 200 KB."""
+    ensure_default_desktop()
+    fg_hwnd = foreground()
+    target_hwnd = hwnd or (0 if full_screen else fg_hwnd)
+    capture_mode = "offscreen_gdi"
+    img: Image.Image | None = None
+    region: dict[str, Any] = {}
+
+    if not full_screen and target_hwnd and target_hwnd != fg_hwnd:
+        img = capture_window_background_gdi(target_hwnd)
+        if img is not None:
+            region = get_window_rect(target_hwnd)
+        else:
+            capture_mode = "screen_fallback"
+
+    if img is None:
+        capture_mode = "screen_fallback"
+        with mss.MSS() as sct:
+            if full_screen or not target_hwnd:
+                mon = sct.monitors[0]
+                region = {"left": mon["left"], "top": mon["top"], "width": mon["width"], "height": mon["height"]}
+            else:
+                rect = get_window_rect(target_hwnd)
+                if rect["width"] <= 0 or rect["height"] <= 0:
+                    raise ComputerError("Dimensions de fenêtre invalides pour la capture.")
+                region = rect
+            shot = sct.grab(region)
+            img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+
+    img.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
+
+    if elements_to_annotate:
+        try:
+            draw = ImageDraw.Draw(img)
+            for el in elements_to_annotate:
+                box = el.get("gemini_box_2d")
+                if box and len(box) == 4:
+                    ymin, xmin, ymax, xmax = box
+                    left = int(xmin / 1000.0 * img.width)
+                    top = int(ymin / 1000.0 * img.height)
+                    right = int(xmax / 1000.0 * img.width)
+                    bottom = int(ymax / 1000.0 * img.height)
+                    draw.rectangle([left, top, right, bottom], outline=(255, 60, 60), width=1)
+                    badge_w = 16 if el["index"] < 10 else (22 if el["index"] < 100 else 28)
+                    badge_h = min(13, max(8, bottom - top))
+                    draw.rectangle([left, top, min(right, left + badge_w), top + badge_h], fill=(255, 60, 60))
+                    draw.text((left + 2, top + 1), str(el["index"]), fill=(255, 255, 255))
+        except Exception:
+            pass
+
+    # Anti-Crash 400 enforcement: guarantee WebP < 200 KB (target <= 195 KB)
+    current_q = quality
+    current_img = img
+    max_allowed = 195 * 1024
+
+    buf = io.BytesIO()
+    current_img.save(buf, format="WEBP", quality=current_q, method=4)
+    data = buf.getvalue()
+
+    while len(data) > max_allowed and current_q > 20:
+        current_q -= 15
+        buf = io.BytesIO()
+        current_img.save(buf, format="WEBP", quality=current_q, method=4)
+        data = buf.getvalue()
+
+    while len(data) > max_allowed and current_img.width > 320:
+        new_w = int(current_img.width * 0.8)
+        new_h = int(current_img.height * 0.8)
+        current_img = current_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        buf = io.BytesIO()
+        current_img.save(buf, format="WEBP", quality=max(current_q, 30), method=4)
+        data = buf.getvalue()
+
+    if return_meta:
+        meta = {
+            "original_bounds": region,
+            "original_size": (region.get("width", 0), region.get("height", 0)),
+            "captured_size": current_img.size,
+            "width": current_img.width,
+            "height": current_img.height,
+            "scale_factor": round(current_img.size[0] / max(1, region.get("width", 1)), 4),
+            "capture_mode": capture_mode,
+            "size_bytes": len(data),
+        }
+        return data, meta
+
+    return data
+
+
+def cleanup_screenshot_cache(max_files: int = 50, max_age_hours: float = 24.0) -> int:
+    """Removes old cached screenshots from ~/.nexusagy/screenshots."""
+    cache_dir = Path.home() / ".nexusagy" / "screenshots"
+    if not cache_dir.exists():
+        return 0
+    now = time.time()
+    max_age_sec = max_age_hours * 3600.0
+    files = list(cache_dir.glob("*.webp")) + list(cache_dir.glob("*.png"))
+    removed = 0
+    for f in files:
+        try:
+            if now - f.stat().st_mtime > max_age_sec:
+                f.unlink(missing_ok=True)
+                removed += 1
+        except Exception:
+            pass
+    remaining = [f for f in files if f.exists()]
+    if len(remaining) > max_files:
+        remaining.sort(key=lambda p: p.stat().st_mtime)
+        for f in remaining[:-max_files]:
+            try:
+                f.unlink(missing_ok=True)
+                removed += 1
+            except Exception:
+                pass
+    return removed
+
+
+def get_window_state(
+    hwnd: int | None = None,
+    max_elements: int = 50,
+    capture_screenshot: bool = False,
+    output_path: str | None = None,
+    max_depth: int = 30,
+    time_budget: float = 1.618,
+    include_data_url: bool = False,
+    annotate_screenshot: bool = False,
+) -> dict[str, Any]:
+    """Extracts compact UI Automation interactive elements and optional WebP screenshot with Gemini box_2d."""
+    global _element_cache, _cached_window_hwnd, _cache_generation
+    ensure_default_desktop()
+    target_hwnd = hwnd or foreground()
+    if not target_hwnd or not IsWindow(target_hwnd):
+        raise ComputerError("Aucune fenêtre active détectée.")
+
+    win_rect = get_window_rect(target_hwnd)
+    w_width = max(1, win_rect["width"])
+    w_height = max(1, win_rect["height"])
+    title = window_title(target_hwnd)
+    pid = window_pid(target_hwnd)
+    pname = process_name(pid)
+
+    elements: list[dict[str, Any]] = []
+    _element_cache.clear()
+    _cached_window_hwnd = target_hwnd
+    _cache_generation = time.time()
+
+    if uia is not None:
+        try:
+            root_ctrl = uia.ControlFromHandle(target_hwnd)
+            if root_ctrl:
+                start_time = time.perf_counter()
+
+                def walk(ctrl: Any, depth: int = 0) -> None:
+                    if depth > max_depth or len(elements) >= max_elements:
+                        return
+                    if (time.perf_counter() - start_time) > time_budget:
+                        return
+                    for child in ctrl.GetChildren():
+                        if len(elements) >= max_elements or (time.perf_counter() - start_time) > time_budget:
+                            break
+                        try:
+                            c_rect = child.BoundingRectangle
+                            cw = c_rect.right - c_rect.left
+                            ch = c_rect.bottom - c_rect.top
+                        except Exception:
+                            continue
+
+                        if (
+                            c_rect.right <= win_rect["left"]
+                            or c_rect.bottom <= win_rect["top"]
+                            or c_rect.left >= win_rect["right"]
+                            or c_rect.top >= win_rect["bottom"]
+                        ):
+                            continue
+
+                        ctype = child.ControlTypeName
+                        if ctype in _INTERACTIVE_TYPES and cw > 0 and ch > 0:
+                            idx = len(elements) + 1
+                            _element_cache[idx] = child
+
+                            rel_l = c_rect.left - win_rect["left"]
+                            rel_t = c_rect.top - win_rect["top"]
+                            rel_r = c_rect.right - win_rect["left"]
+                            rel_b = c_rect.bottom - win_rect["top"]
+                            rel_cx = rel_l + cw // 2
+                            rel_cy = rel_t + ch // 2
+
+                            val_str = ""
+                            try:
+                                val_pat = child.GetValuePattern()
+                                if val_pat:
+                                    val_str = val_pat.Value or ""
+                            except Exception:
+                                pass
+
+                            elements.append(
+                                {
+                                    "index": idx,
+                                    "type": ctype.replace("Control", ""),
+                                    "name": (child.Name or "")[:60],
+                                    "value": val_str[:60],
+                                    "relative_center": {"x": rel_cx, "y": rel_cy},
+                                    "gemini_box_2d": [
+                                        max(0, min(1000, int(rel_t / w_height * 1000))),
+                                        max(0, min(1000, int(rel_l / w_width * 1000))),
+                                        max(0, min(1000, int(rel_b / w_height * 1000))),
+                                        max(0, min(1000, int(rel_r / w_width * 1000))),
+                                    ],
+                                }
+                            )
+                        walk(child, depth + 1)
+
+                walk(root_ctrl)
+        except Exception:
+            pass
+
+    result: dict[str, Any] = {
+        "hwnd": target_hwnd,
+        "title": title,
+        "process_name": pname,
+        "bounds": win_rect,
+        "element_count": len(elements),
+        "elements": elements,
+    }
+
+    if capture_screenshot or output_path:
+        annotate_list = elements if annotate_screenshot else None
+        webp_bytes, meta = capture_window_image(
+            target_hwnd, return_meta=True, elements_to_annotate=annotate_list
+        )
+        result["image_dimensions"] = meta.get("captured_size")
+        result["scale_factor"] = meta.get("scale_factor")
+
+        dest_path = output_path
+        if not dest_path:
+            cache_dir = Path.home() / ".nexusagy" / "screenshots"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            cleanup_screenshot_cache(max_files=50, max_age_hours=24.0)
+            timestamp = int(time.time() * 1000)
+            dest_path = str(cache_dir / f"window_state_{timestamp}.webp")
+
+        dest = Path(dest_path).expanduser().resolve()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(webp_bytes)
+        result["screenshot_path"] = str(dest)
+
+        if include_data_url:
+            import base64
+
+            result["screenshot_data_url"] = f"data:image/webp;base64,{base64.b64encode(webp_bytes).decode('ascii')}"
+
+    return result
+
+
+def click(
+    hwnd: int | None = None,
+    element_index: int | None = None,
+    x: int | None = None,
+    y: int | None = None,
+    button: str = "left",
+    click_count: int = 1,
+    foreground: bool = False,
+) -> dict[str, Any]:
+    """Clicks on an element [#N] (in background via UI Automation) or at (x, y) coordinates."""
+    ensure_default_desktop()
+    target_hwnd = hwnd or user32.GetForegroundWindow()
+
+    if element_index is not None and element_index in _element_cache:
+        ctrl = _element_cache[element_index]
+        effect = background_activate(ctrl)
+        if effect:
+            return {"success": True, "method": "uia_pattern", "effect": effect, "element_index": element_index}
+
+    if target_hwnd and user32.GetForegroundWindow() != target_hwnd and not foreground:
+        raise RuntimeError(
+            "Le clic physique à la souris requiert la mise au premier plan. "
+            "Pour ne pas interrompre le travail de Julien, passez foreground=True."
+        )
+
+    if element_index is not None and element_index in _element_cache:
+        ctrl = _element_cache[element_index]
+        try:
+            r = ctrl.BoundingRectangle
+            click_x = (r.left + r.right) // 2
+            click_y = (r.top + r.bottom) // 2
+        except Exception:
+            raise ComputerError("Impossible d'obtenir les coordonnées de l'élément.")
+    elif x is not None and y is not None:
+        rect = get_window_rect(target_hwnd)
+        click_x = rect["left"] + x
+        click_y = rect["top"] + y
+    else:
+        raise ComputerError("Spécifiez soit element_index soit (x, y).")
+
+    click_at(click_x, click_y, button=button, count=click_count)
+    return {
+        "success": True,
+        "method": "physical_click",
+        "x": click_x,
+        "y": click_y,
+        "button": button,
+        "count": click_count,
+    }
+
+
+def mouse_move(
+    x: int,
+    y: int,
+    hwnd: int | None = None,
+    smooth: bool = True,
+    steps: int = 10,
+    duration_ms: int = 200,
+    foreground: bool = False,
+) -> dict[str, Any]:
+    """Moves physical cursor to window coordinates (x, y). Requires foreground=True."""
+    ensure_default_desktop()
+    target_hwnd = hwnd or user32.GetForegroundWindow()
+    if target_hwnd and user32.GetForegroundWindow() != target_hwnd and not foreground:
+        raise RuntimeError(
+            "Le déplacement de la souris requiert la mise au premier plan. "
+            "Pour ne pas interrompre le travail de Julien, passez foreground=True."
+        )
+    rect = get_window_rect(target_hwnd)
+    target_x = rect["left"] + x
+    target_y = rect["top"] + y
+
+    if smooth and steps > 1:
+        pt = POINT()
+        user32.GetCursorPos(ctypes.byref(pt))
+        start_x, start_y = pt.x, pt.y
+        step_delay = (duration_ms / 1000.0) / steps
+        for i in range(1, steps + 1):
+            cur_x = int(start_x + (target_x - start_x) * (i / steps))
+            cur_y = int(start_y + (target_y - start_y) * (i / steps))
+            user32.SetCursorPos(cur_x, cur_y)
+            if step_delay > 0:
+                time.sleep(step_delay)
+    else:
+        user32.SetCursorPos(target_x, target_y)
+
+    return {"success": True, "x": target_x, "y": target_y, "smooth": smooth, "steps": steps}
+
+
+def type_text(
+    text: str,
+    hwnd: int | None = None,
+    element_index: int | None = None,
+    clear_first: bool = False,
+    foreground: bool = False,
+) -> dict[str, Any]:
+    """Types text into an element [#N] in background via ValuePattern without stealing focus."""
+    ensure_default_desktop()
+    target_hwnd = hwnd or user32.GetForegroundWindow()
+
+    if element_index is not None and element_index in _element_cache:
+        ctrl = _element_cache[element_index]
+        try:
+            vp = ctrl.GetValuePattern()
+            if vp:
+                final_text = text if clear_first else (vp.Value or "") + text
+                vp.SetValue(final_text)
+                return {
+                    "success": True,
+                    "method": "uia_value_pattern",
+                    "element_index": element_index,
+                    "length": len(text),
+                }
+        except Exception:
+            pass
+
+    if target_hwnd and user32.GetForegroundWindow() != target_hwnd and not foreground:
+        raise RuntimeError(
+            "La saisie clavier physique requiert la mise au premier plan. "
+            "Pour ne pas interrompre le travail de Julien, passez foreground=True."
+        )
+
+    if clear_first:
+        press_combo("ctrl+a")
+        press_combo("backspace")
+
+    type_unicode(text)
+    return {"success": True, "method": "physical_keyboard", "length": len(text)}
+
+
+VK_MAP: dict[str, int] = {
+    "enter": 0x0D,
+    "return": 0x0D,
+    "tab": 0x09,
+    "space": 0x20,
+    "backspace": 0x08,
+    "escape": 0x1B,
+    "esc": 0x1B,
+    "delete": 0x2E,
+    "del": 0x2E,
+    "insert": 0x2D,
+    "home": 0x24,
+    "end": 0x23,
+    "pageup": 0x21,
+    "page_up": 0x21,
+    "pagedown": 0x22,
+    "page_down": 0x22,
+    "up": 0x26,
+    "down": 0x28,
+    "left": 0x25,
+    "right": 0x27,
+    "ctrl": 0x11,
+    "control": 0x11,
+    "alt": 0x12,
+    "shift": 0x10,
+    "win": 0x5B,
+    "windows": 0x5B,
+    "cmd": 0x5B,
+    **{f"f{n}": 0x6F + n for n in range(1, 13)},
+}
+EXTENDED_VKEYS = {0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2D, 0x2E}
+
+
+def press_key(keys: str, hwnd: int | None = None, foreground: bool = False) -> dict[str, Any]:
+    """Presses key combination (e.g. 'ctrl+c', 'alt+f4', 'win+r', 'enter', 'ctrl+,')."""
+    ensure_default_desktop()
+    target_hwnd = hwnd or user32.GetForegroundWindow()
+
+    if target_hwnd and user32.GetForegroundWindow() != target_hwnd:
+        if not foreground:
+            raise RuntimeError(
+                "L'envoi de touches physiques requiert la mise au premier plan de la fenêtre. "
+                "Pour ne pas interrompre le travail de Julien, passez foreground=True."
+            )
+        focus_window(hwnd=target_hwnd)
+        for _ in range(5):
+            if user32.GetForegroundWindow() == target_hwnd:
+                break
+            time.sleep(0.04)
+        current_fg = user32.GetForegroundWindow()
+        if current_fg != target_hwnd:
+            raise RuntimeError(
+                f"Impossible d'activer la fenêtre cible (HWND={target_hwnd}) au premier plan avant la combinaison de touches (fenêtre active : HWND={current_fg})."
+            )
+
+    parts = [k.strip().lower() for k in keys.split("+") if k.strip()]
+    if not parts:
+        raise ValueError("Combinaison de touches vide.")
+
+    vk_entries: list[tuple[int, bool]] = []
+    for part in parts:
+        if part in VK_MAP:
+            vk = VK_MAP[part]
+            vk_entries.append((vk, vk in EXTENDED_VKEYS))
+        elif len(part) == 1:
+            if part.isalnum():
+                vk_entries.append((ord(part.upper()), False))
+            else:
+                vk_scan = VkKeyScanW(part)
+                if vk_scan != -1:
+                    vk = vk_scan & 0xFF
+                    vk_entries.append((vk, vk in EXTENDED_VKEYS))
+                else:
+                    vk_entries.append((ord(part.upper()), False))
+        else:
+            raise ValueError(f"Touche inconnue : {part}")
+
+    down_inputs = []
+    for vk, is_ext in vk_entries:
+        inp = INPUT(type=INPUT_KEYBOARD)
+        inp.union.ki.wVk = vk
+        flags = KEYEVENTF_EXTENDEDKEY if is_ext else 0
+        inp.union.ki.dwFlags = flags
+        down_inputs.append(inp)
+    _send_inputs(down_inputs)
+    time.sleep(0.03)
+
+    up_inputs = []
+    for vk, is_ext in reversed(vk_entries):
+        inp = INPUT(type=INPUT_KEYBOARD)
+        inp.union.ki.wVk = vk
+        flags = KEYEVENTF_KEYUP
+        if is_ext:
+            flags |= KEYEVENTF_EXTENDEDKEY
+        inp.union.ki.dwFlags = flags
+        up_inputs.append(inp)
+    _send_inputs(up_inputs)
+
+    return {"success": True, "keys": keys, "vk_codes": [v[0] for v in vk_entries]}
+
+
+def scroll(
+    delta_y: int = 0,
+    delta_x: int = 0,
+    hwnd: int | None = None,
+    x: int | None = None,
+    y: int | None = None,
+    element_index: int | None = None,
+    foreground: bool = False,
+) -> dict[str, Any]:
+    """Scrolls via background UI Automation ScrollPattern or mouse wheel."""
+    ensure_default_desktop()
+    target_hwnd = hwnd or user32.GetForegroundWindow()
+
+    if element_index is not None and element_index in _element_cache:
+        ctrl = _element_cache[element_index]
+        curr = ctrl
+        scroll_pat = None
+        for _ in range(15):
+            if not curr:
+                break
+            try:
+                sp = curr.GetScrollPattern()
+                if sp and (
+                    (delta_y != 0 and getattr(sp, "VerticallyScrollable", False))
+                    or (delta_x != 0 and getattr(sp, "HorizontallyScrollable", False))
+                ):
+                    scroll_pat = sp
+                    break
+            except Exception:
+                pass
+            try:
+                curr = curr.GetParentControl()
+            except Exception:
+                break
+        if scroll_pat:
+            v_amt = 1 if delta_y > 0 else (4 if delta_y < 0 else 2)
+            h_amt = 4 if delta_x > 0 else (1 if delta_x < 0 else 2)
+            steps = abs(delta_y) or abs(delta_x) or 1
+            for _ in range(min(steps, 20)):
+                scroll_pat.Scroll(h_amt, v_amt)
+            return {
+                "success": True,
+                "method": "uia_scroll",
+                "element_index": element_index,
+                "delta_y": delta_y,
+                "delta_x": delta_x,
+            }
+
+    if target_hwnd and user32.GetForegroundWindow() != target_hwnd and not foreground:
+        raise RuntimeError(
+            "Le défilement par molette physique requiert la mise au premier plan. "
+            "Pour ne pas interrompre le travail de Julien, passez foreground=True."
+        )
+    if x is not None and y is not None:
+        rect = get_window_rect(target_hwnd)
+        move_cursor(rect["left"] + x, rect["top"] + y)
+
+    scroll_at((0, 0), vertical=delta_y, horizontal=delta_x)
+    return {"success": True, "delta_y": delta_y, "delta_x": delta_x}

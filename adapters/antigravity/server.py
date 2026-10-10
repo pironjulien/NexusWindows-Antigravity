@@ -3,6 +3,7 @@
 Exposes native tools with Anti-Crash 400 WebP enforcement (< 200 KB),
 Gemini box_2d [ymin, xmin, ymax, xmax] spatial grounding (0-1000),
 Set-of-Marks [#1..#N], and Spotlight companion supervision (Alt + Space).
+Directly powered by unified core.engine and core.spotlight.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import io
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +20,8 @@ import anyio
 from mcp.server.fastmcp import FastMCP
 from mcp.server.stdio import stdio_server
 
-from client import computer_client, spotlight_launcher
+import core.engine as engine
+import core.spotlight as spotlight
 
 ANTIGRAVITY_INSTRUCTIONS = """SOTA Windows OS Computer Use & Spotlight Companion bridge for Antigravity.
 - UI Automation in background by default.
@@ -41,13 +44,13 @@ def _format_result(func: Any, *args: Any, **kwargs: Any) -> str:
 @tool
 def computer_list_windows(visible_only: bool = True) -> str:
     """Liste toutes les fenêtres ouvertes du bureau Windows avec HWND, titre, PID, nom du processus, coordonnées et état premier plan."""
-    return _format_result(computer_client.list_windows, visible_only=visible_only)
+    return _format_result(engine.list_windows, visible_only=visible_only)
 
 
 @tool
 def computer_list_apps() -> str:
     """Liste les applications graphiques en cours d'exécution groupées par processus."""
-    return _format_result(computer_client.list_apps)
+    return _format_result(engine.list_apps)
 
 
 @tool
@@ -57,7 +60,7 @@ def computer_focus_window(
     process_name: str | None = None,
 ) -> str:
     """Met la fenêtre cible au premier plan, la restaure si réduite et lui donne le focus."""
-    return _format_result(computer_client.focus_window, hwnd=hwnd, title=title, process_name=process_name)
+    return _format_result(engine.focus_window, hwnd=hwnd, title=title, process_name_filter=process_name)
 
 
 @tool
@@ -72,7 +75,7 @@ def computer_get_window_state(
     """Extrait l'état complet de la fenêtre ciblée avec arbre UI Automation compact [#1..#N],
     coordonnées Gemini box_2d [ymin, xmin, ymax, xmax] (0-1000), et capture WebP < 200 Ko."""
     return _format_result(
-        computer_client.get_window_state,
+        engine.get_window_state,
         hwnd=hwnd,
         max_elements=max_elements,
         capture_screenshot=capture_screenshot,
@@ -94,7 +97,7 @@ def computer_click(
 ) -> str:
     """Clique sur un élément [#N] (en arrière-plan via UI Automation) ou sur (x, y)."""
     return _format_result(
-        computer_client.click,
+        engine.click,
         hwnd=hwnd,
         element_index=element_index,
         x=x,
@@ -117,7 +120,7 @@ def computer_mouse_move(
 ) -> str:
     """Déplace le curseur vers des coordonnées (x, y). Exige foreground=True pour confirmer le pilotage physique."""
     return _format_result(
-        computer_client.mouse_move,
+        engine.mouse_move,
         x=x,
         y=y,
         hwnd=hwnd,
@@ -138,7 +141,7 @@ def computer_type_text(
 ) -> str:
     """Saisit du texte dans un élément [#N] en arrière-plan via UI Automation ValuePattern sans voler le focus."""
     return _format_result(
-        computer_client.type_text,
+        engine.type_text,
         text=text,
         hwnd=hwnd,
         element_index=element_index,
@@ -150,7 +153,7 @@ def computer_type_text(
 @tool
 def computer_press_key(keys: str, hwnd: int | None = None, foreground: bool = False) -> str:
     """Presse une combinaison de touches système (raccourcis clavier). Exige foreground=True."""
-    return _format_result(computer_client.press_key, keys=keys, hwnd=hwnd, foreground=foreground)
+    return _format_result(engine.press_key, keys=keys, hwnd=hwnd, foreground=foreground)
 
 
 @tool
@@ -165,7 +168,7 @@ def computer_scroll(
 ) -> str:
     """Fait défiler un conteneur en arrière-plan via UI Automation ou via molette."""
     return _format_result(
-        computer_client.scroll,
+        engine.scroll,
         delta_y=delta_y,
         delta_x=delta_x,
         hwnd=hwnd,
@@ -189,9 +192,9 @@ def computer_drag(
 ) -> str:
     """Effectue un glisser-déposer fluide à la souris entre deux coordonnées. Exige foreground=True."""
     return _format_result(
-        computer_client.drag,
-        from_x=from_x,
-        from_y=from_y,
+        engine.drag,
+        start=from_x,
+        end=from_y,
         to_x=to_x,
         to_y=to_y,
         hwnd=hwnd,
@@ -211,25 +214,26 @@ def computer_take_screenshot(
     """Prend une capture d'écran compressée en WebP sous 200 Ko (Règle Anti-Crash 400)."""
 
     def _action() -> dict[str, Any]:
-        import time
-
         elements_to_draw = None
         if annotate_screenshot:
-            target_hwnd = hwnd or computer_client.user32.GetForegroundWindow()
-            state = computer_client.get_window_state(hwnd=target_hwnd, capture_screenshot=False)
+            target_hwnd = hwnd or engine.foreground()
+            state = engine.get_window_state(hwnd=target_hwnd, capture_screenshot=False)
             elements_to_draw = state.get("elements")
 
-        data_bytes, meta = computer_client.capture_window_image(
+        data_bytes, meta = engine.capture_window_image(
             hwnd=hwnd,
             full_screen=full_screen,
             return_meta=True,
             elements_to_annotate=elements_to_draw,
         )
         dest_path = output_path
-        if not dest_path:
+        if dest_path:
+            dest_p = Path(dest_path).expanduser().resolve()
+            dest_path = str(dest_p)
+        else:
             cache_dir = Path.home() / ".nexusagy" / "screenshots"
             cache_dir.mkdir(parents=True, exist_ok=True)
-            computer_client.cleanup_screenshot_cache(max_files=50, max_age_hours=24.0)
+            engine.cleanup_screenshot_cache(max_files=50, max_age_hours=24.0)
             timestamp = int(time.time() * 1000)
             dest_path = str(cache_dir / f"screenshot_{timestamp}.webp")
 
@@ -242,6 +246,7 @@ def computer_take_screenshot(
             "size_bytes": len(data_bytes),
             "width": meta.get("width"),
             "height": meta.get("height"),
+            "capture_mode": meta.get("capture_mode", "offscreen_gdi"),
             "original_bounds": meta.get("original_bounds"),
             "scale_factor": meta.get("scale_factor"),
             "annotated": annotate_screenshot,
@@ -253,13 +258,13 @@ def computer_take_screenshot(
 @tool
 def computer_spotlight_status() -> str:
     """Vérifie si le compagnon Antigravity Spotlight (Alt + Espace) est actif."""
-    running = spotlight_launcher.is_spotlight_running()
+    running = spotlight.is_spotlight_running()
     return json.dumps(
         {
             "status": "online" if running else "stopped",
             "running": running,
             "shortcut": "Alt + Space (ou Alt + Shift + Space)",
-            "script": str(spotlight_launcher.SPOTLIGHT_SCRIPT_PATH),
+            "script": str(spotlight.SPOTLIGHT_SCRIPT_PATH),
         },
         indent=2,
         ensure_ascii=False,
@@ -270,9 +275,9 @@ def computer_spotlight_status() -> str:
 def computer_spotlight_toggle(action: str = "start") -> str:
     """Démarre ou arrête le compagnon Antigravity Spotlight (Alt + Espace)."""
     if action == "stop":
-        success = spotlight_launcher.stop_spotlight()
+        success = spotlight.stop_spotlight()
         return json.dumps({"action": "stop", "success": success}, indent=2)
-    success = spotlight_launcher.start_spotlight_background()
+    success = spotlight.start_spotlight_background()
     return json.dumps(
         {
             "action": "start",

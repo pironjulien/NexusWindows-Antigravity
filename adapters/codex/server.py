@@ -7,6 +7,7 @@ stale element detection, and token-efficient descriptions.
 from __future__ import annotations
 
 import io
+import json
 import os
 import sys
 import time
@@ -67,17 +68,25 @@ def _background(
 
 @tool
 def computer_list_windows() -> str:
-    """Lists visible desktop windows ordered from foreground to background."""
-    lines = []
-    for window in engine.list_windows():
-        bounds = window["bounds"]
-        geometry = f"{bounds[2]}x{bounds[3]} @ ({bounds[0]},{bounds[1]})" if bounds else "-"
-        marker = " [FOREGROUND]" if window["foreground"] else ""
-        lines.append(
-            f"hwnd {window['hwnd']} | {window['process']} | {window['state']} | {geometry} | "
-            f"« {window['title'][:100]} »{marker}"
-        )
-    return "\n".join(lines) or "No visible windows found."
+    """Lists visible desktop windows ordered from foreground to background in structured JSON."""
+    windows = engine.list_windows(visible_only=True)
+    payload = {
+        "schema": "nexus-computer/1",
+        "count": len(windows),
+        "windows": [
+            {
+                "hwnd": w["hwnd"],
+                "title": w["title"],
+                "process": w["process_name"],
+                "pid": w["pid"],
+                "state": w["state"],
+                "foreground": w["foreground"],
+                "bounds": [w["bounds"][0], w["bounds"][1], w["bounds"][2], w["bounds"][3]] if w["bounds"] else None,
+            }
+            for w in windows
+        ],
+    }
+    return json.dumps(payload, indent=2, ensure_ascii=False)
 
 
 @tool
@@ -124,17 +133,57 @@ def computer_zoom(x1: int, y1: int, x2: int, y2: int, hwnd: int | None = None) -
 
 @tool
 def computer_get_window_state(hwnd: int | None = None, max_elements: int = 60, screenshot: bool = False) -> Content:
-    """Extracts interactive UI Automation elements for the window: [N] Type "Name" (center) width x height."""
+    """Extracts interactive UI Automation elements for the window with structured JSON schema."""
     target = engine.resolve_target(hwnd)
     frame, lines, truncated = engine.window_elements(target, min(max(1, max_elements), 300))
     if len(lines) < 2:
         time.sleep(0.4)
         frame, lines, truncated = engine.window_elements(target, max_elements)
-    header = f"{engine.describe(target)} — {frame.summary()}"
-    if truncated:
-        lines.append(f"... elements truncated (limit={max_elements} or timeout)")
-    text = "\n".join([header, *(lines or ["No interactive UI Automation elements found. Use computer_screenshot."])])
-    return _capture(target, text, engine.SESSION.marks) if screenshot else text
+
+    elements_list = []
+    for idx, ctrl in sorted(engine.SESSION.elements.items()):
+        box = engine.SESSION.marks.get(idx)
+        if not box:
+            continue
+        try:
+            name = (ctrl.Name or "")[:80]
+            ctype = ctrl.ControlTypeName.removesuffix("Control")
+        except Exception:
+            continue
+        elements_list.append(
+            {
+                "id": idx,
+                "role": ctype,
+                "name": name,
+                "bbox_px": list(box),
+                "center_px": [(box[0] + box[2]) // 2, (box[1] + box[3]) // 2],
+            }
+        )
+
+    obs_payload = {
+        "schema": "nexus-computer/1",
+        "observation_id": f"obs_{target}_{int(time.time() * 1000)}",
+        "target": {
+            "hwnd": target,
+            "title": engine.window_title(target),
+            "process": engine.process_name(engine.window_pid(target)),
+            "pid": engine.window_pid(target),
+        },
+        "frame": {
+            "image_px": [frame.image_width, frame.image_height],
+            "physical_px": [frame.width, frame.height],
+            "origin": [frame.left, frame.top],
+            "scale": round(frame.image_width / max(1, frame.width), 4),
+        },
+        "truncated": truncated,
+        "element_count": len(elements_list),
+        "elements": elements_list,
+    }
+    json_text = json.dumps(obs_payload, indent=2, ensure_ascii=False)
+    if screenshot:
+        _, png, _ = engine.screenshot(target, engine.SESSION.marks)
+        return [json_text, Image(data=png, format="png")]
+    return json_text
 
 
 @tool
@@ -156,11 +205,16 @@ def computer_click(
         raise ComputerError(f"Unknown method: {method!r} (expected auto, uia, or mouse).")
     simple = button == "left" and click_count == 1
     if element_index is not None:
+        if target != engine.SESSION.elements_hwnd or element_index not in engine.SESSION.elements:
+            raise ComputerError(
+                f"STALE_ELEMENT: Element [{element_index}] not found in target window (hwnd={target}). "
+                "The UI tree may have changed or the window was reloaded. Call computer_get_window_state to refresh element IDs."
+            )
         try:
             control = engine.element(target, element_index)
         except Exception:
             raise ComputerError(
-                f"STALE_ELEMENT: Element [{element_index}] not found in target window. "
+                f"STALE_ELEMENT: Element [{element_index}] is stale or inaccessible in target window. "
                 "Call computer_get_window_state to refresh element IDs."
             ) from None
         label = f"[{element_index}] {engine._quoted(control.Name, 60)}"
@@ -228,11 +282,17 @@ def computer_type_text(
         raise ComputerError(f"Text too long ({len(text)} chars, maximum {MAX_TEXT}). Split into smaller batches.")
     target = engine.resolve_target(hwnd)
     if element_index is not None:
+        if target != engine.SESSION.elements_hwnd or element_index not in engine.SESSION.elements:
+            raise ComputerError(
+                f"STALE_ELEMENT: Element [{element_index}] not found in target window (hwnd={target}). "
+                "The UI tree may have changed or the window was reloaded. Call computer_get_window_state to refresh element IDs."
+            )
         try:
             control = engine.element(target, element_index)
         except Exception:
             raise ComputerError(
-                f"STALE_ELEMENT: Element [{element_index}] not found. Call computer_get_window_state to refresh."
+                f"STALE_ELEMENT: Element [{element_index}] is stale or inaccessible in target window. "
+                "Call computer_get_window_state to refresh element IDs."
             ) from None
         with engine.ForegroundGuard(target) as guard:
             written = engine.set_value(control, text, append=not clear_first)

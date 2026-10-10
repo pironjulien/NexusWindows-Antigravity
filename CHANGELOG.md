@@ -4,6 +4,21 @@ Toutes les modifications notables apportées au projet **Antigravity Computer Us
 
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/), et ce projet adhère au versioning sémantique.
 
+## [2.3.1] - 2026-10-10
+
+### Modifié
+- **Consolidation Définitive du Moteur Unique (`core/engine.py`)** :
+  - Élimination complète de la dette technique du double moteur : `adapters/antigravity/server.py` basculé à 100% sur `core/engine.py` et `core/spotlight.py`.
+  - Reconversion des anciens modules `client/computer_client.py` et `client/spotlight_launcher.py` en shims ultra-légers de rétrocompatibilité sans duplication de logique.
+  - Introduction de la classe universelle `WindowBounds` (héritant de `tuple` avec accès dictionnaire et attributs `.width`/`.height`) garantissant la compatibilité polymorphique across Claude, Codex et Antigravity.
+  - Implémentation de la boucle adaptative de compression WebP (< 195 Ko) avec réduction progressive de la qualité et redimensionnement dynamique au facteur $0,8$, validant mathématiquement le standard Anti-Crash 400.
+  - Support de métadonnées exhaustives pour Antigravity (`width`, `height`, `captured_size`, `scale_factor`, `capture_mode`).
+  - Signature polymorphique universelle pour `drag()` acceptant tant le format Claude `(start, end, steps)` que le format historique Antigravity `(from_x, from_y, to_x, to_y)`.
+- **Adaptateur Codex / OpenAI (`adapters/codex/server.py`)** :
+  - Harmonisation des retours structurés JSON sous schéma officiel `nexus-computer/1`.
+  - Renforcement du contrôle `STALE_ELEMENT` avec validation croisée de l'état de session UIA.
+  - Bornage de sécurité pour la répétition de touches (`repeat = min(max(1, repeat), 50)`).
+
 ## [2.3.0] - 2026-10-10
 
 ### Ajouté
