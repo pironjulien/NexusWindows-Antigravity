@@ -174,12 +174,12 @@ def computer_click(
         if method == "uia":
             raise ComputerError(f"{label} n'offre pas d'action UI Automation pour ce clic : rien n'a été fait.")
         _require_foreground(foreground, f"Ce clic sur {label}")
-        engine.ensure_input_target(target)
-        center = engine.element_center(control, engine.current_frame(target))
-        if center is None:
-            raise ComputerError(f"{label} n'est pas visible dans la fenêtre : rien n'a été cliqué.")
-        engine.ensure_point(target, *center)
-        engine.click_at(*center, button=button, count=click_count)
+        with engine.input_target(target):
+            center = engine.element_center(control, engine.current_frame(target))
+            if center is None:
+                raise ComputerError(f"{label} n'est pas visible dans la fenêtre : rien n'a été cliqué.")
+            engine.ensure_point(target, *center)
+            engine.click_at(*center, button=button, count=click_count)
         return _done(target, f"Clic souris {button} ×{click_count} sur {label}.", screenshot_after, settle_ms)
 
     if x is None or y is None:
@@ -188,9 +188,8 @@ def computer_click(
     frame.check(x, y)
     _require_foreground(foreground, "Un clic à une position")
     point = frame.to_screen(x, y)
-    engine.ensure_input_target(target)
-    engine.ensure_point(target, *point)
-    engine.click_at(*point, button=button, count=click_count)
+    with engine.input_target(target, point):
+        engine.click_at(*point, button=button, count=click_count)
     return _done(target, f"Clic souris {button} ×{click_count} en ({x},{y}).", screenshot_after, settle_ms)
 
 
@@ -209,9 +208,8 @@ def computer_move_mouse(
     frame.check(x, y)
     _require_foreground(foreground, "Le survol à la souris")
     point = frame.to_screen(x, y)
-    engine.ensure_input_target(target)
-    engine.ensure_point(target, *point)
-    engine.move_cursor(*point)
+    with engine.input_target(target, point):
+        engine.move_cursor(*point)
     return _done(target, f"Curseur en ({x},{y}).", screenshot_after, settle_ms)
 
 
@@ -243,19 +241,18 @@ def computer_type_text(
                 settle_ms,
             )
         _require_foreground(foreground, f"La saisie au clavier dans [{element_index}]")
-        engine.ensure_input_target(target)
-        if not engine.focus_element(control):
+    else:
+        _require_foreground(foreground, "La saisie au clavier sans element_index")
+    with engine.input_target(target):
+        if element_index is not None and not engine.focus_element(control):
             raise ComputerError(
                 f"[{element_index}] n'a pas pu recevoir le focus (disparu, désactivé ou non focusable) : "
                 "relancez computer_get_window_state. Rien n'a été tapé."
             )
-    else:
-        _require_foreground(foreground, "La saisie au clavier sans element_index")
-        engine.ensure_input_target(target)
-    if clear_first:
-        engine.press_combo("ctrl+a")
-        engine.press_combo("backspace")
-    engine.type_unicode(text)
+        if clear_first:
+            engine.press_combo("ctrl+a")
+            engine.press_combo("backspace")
+        engine.type_unicode(text)
     return _done(target, f"{len(text)} caractères tapés au clavier.", screenshot_after, settle_ms)
 
 
@@ -277,10 +274,10 @@ def computer_press_key(
         engine.parse_combo(combo)
     target = engine.resolve_target(hwnd)
     _require_foreground(foreground, "Le clavier")
-    engine.ensure_input_target(target)
-    for _ in range(repeat):
-        for combo in combos:
-            engine.press_combo(combo)
+    with engine.input_target(target):
+        for _ in range(repeat):
+            for combo in combos:
+                engine.press_combo(combo)
     return _done(
         target,
         f"Touches envoyées : {keys}" + (f" ×{repeat}" if repeat > 1 else "") + ".",
@@ -329,9 +326,8 @@ def computer_scroll(
         frame = engine.current_frame(target)
         point = (frame.left + frame.width // 2, frame.top + frame.height // 2)
     _require_foreground(foreground, "La molette de la souris")
-    engine.ensure_input_target(target)
-    engine.ensure_point(target, *point)
-    engine.scroll_at(*point, direction, amount)
+    with engine.input_target(target, point):
+        engine.scroll_at(*point, direction, amount)
     return _done(target, f"Défilement molette {direction} ×{amount}.", screenshot_after, settle_ms)
 
 
@@ -353,10 +349,8 @@ def computer_drag(
     frame.check(to_x, to_y)
     _require_foreground(foreground, "Le glisser-déposer")
     start, end = frame.to_screen(from_x, from_y), frame.to_screen(to_x, to_y)
-    engine.ensure_input_target(target)
-    engine.ensure_point(target, *start)
-    engine.ensure_point(target, *end)
-    engine.drag(start, end)
+    with engine.input_target(target, start, end):
+        engine.drag(start, end)
     return _done(target, f"Glissé de ({from_x},{from_y}) à ({to_x},{to_y}).", screenshot_after, settle_ms)
 
 

@@ -71,10 +71,10 @@ def test_capture_window_image_anti_crash_400():
 
 
 def test_press_key_validation():
-    with pytest.raises(ValueError, match="Combinaison de touches vide"):
+    with pytest.raises(computer_client.ComputerError, match="Combinaison de touches vide"):
         computer_client.press_key("")
 
-    with pytest.raises(ValueError, match="Touche inconnue"):
+    with pytest.raises(computer_client.ComputerError, match="Touche inconnue"):
         computer_client.press_key("ctrl+invalidkey123")
 
 
@@ -116,7 +116,7 @@ def test_mcp_modular_scopes():
 
 def test_press_key_punctuation():
     # Should resolve punctuation keys properly via VkKeyScanW without hardware side-effects
-    with patch.object(computer_client, "_send_inputs", return_value=2):
+    with patch.object(computer_client, "_send", return_value=None):
         res = computer_client.press_key("ctrl+,")
         assert res["success"] is True
         assert len(res["vk_codes"]) >= 2
@@ -136,7 +136,10 @@ def test_dwm_bounds_accurate():
 
 def test_mouse_move_smooth():
     # Verify smooth calculation without displacing the user's physical mouse cursor
-    with patch.object(computer_client.user32, "SetCursorPos", return_value=1):
+    with (
+        patch.object(computer_client.user32, "SetCursorPos", return_value=1),
+        patch.object(computer_client, "ensure_point", return_value=None),
+    ):
         res = computer_client.mouse_move(x=10, y=10, smooth=True, steps=3, duration_ms=10)
         assert res["success"] is True
         assert res["smooth"] is True

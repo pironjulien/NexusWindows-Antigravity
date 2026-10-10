@@ -4,6 +4,23 @@ Toutes les modifications notables apportées au projet **Antigravity Computer Us
 
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/), et ce projet adhère au versioning sémantique.
 
+## [2.3.4] - 2026-10-10
+
+### Corrigé
+- **Course au premier plan entre agents** : la vérification et l'activation de la fenêtre cible se faisaient avant la prise du verrou `Local
+exus-computer-input`. Pendant l'attente (jusqu'à 5 s), un autre agent pouvait mettre une autre fenêtre devant, et le clic ou la frappe y arrivait. Le nouveau gestionnaire `engine.input_target(hwnd, *points)` tient le verrou de l'activation (ou du contrôle du premier plan) jusqu'à la dernière entrée. Il est utilisé par les trois serveurs (`server.py`, `adapters/claude`, `adapters/codex`) et par toute la couche héritée (`click`, `mouse_move`, `type_text`, `press_key`, `scroll`, `drag`).
+- **Couche héritée (Antigravity) avec `foreground=True`** : la fenêtre cible n'était jamais mise au premier plan, et l'entrée partait vers la fenêtre active de Julien. Elle est désormais activée puis vérifiée, et chaque point est contrôlé (`ensure_point`) avant l'envoi. Sans `foreground=True`, le premier plan n'est jamais pris.
+- **`STALE_ELEMENT`** : un seul résolveur, `_cached_element`, n'accepte qu'une liste d'éléments relevée pour la fenêtre ciblée. Cela supprime la relecture non contrôlée de `_element_cache` dans `click()` et le cache sans contrôle de fenêtre dans `scroll()`. Le clic physique réutilise l'élément déjà validé. Seul le clic gauche simple passe par UI Automation.
+- **`press_key()` hérité** : il lève `ComputerError` (plus de `RuntimeError` ni de `ValueError`) et valide la combinaison avant de toucher au premier plan. Il utilise le même analyseur que les serveurs (`parse_combo`, qui gère la disposition du clavier et les touches F1 à F24). Les alias `cmd`, `page_up` et `page_down` sont conservés.
+- **`drag()`** : les deux signatures appellent `ensure_default_desktop()` et refusent un `hwnd` inexistant. Le tracé est commun (`_drag_path`). La position de la fenêtre est mesurée après son activation.
+- **Défilement physique hérité** : sans `x`/`y`, la molette agit au centre de la fenêtre ciblée, plus à la position courante du curseur.
+
+### Supprimé
+- `_send_inputs`, `VK_MAP` et `EXTENDED_VKEYS`, doublons de `_send`, `_KEY_NAMES` et `_EXTENDED_VKS`.
+
+### Tests
+- 89 tests unitaires (72 auparavant), dont un test de régression de la course au verrou pour chaque action physique. Les tests vérifient aussi qu'aucun serveur n'active une fenêtre hors de `input_target`. Les tests des actions héritées n'envoient plus aucune entrée réelle.
+
 ## [2.3.3] - 2026-10-10
 
 ### Corrigé

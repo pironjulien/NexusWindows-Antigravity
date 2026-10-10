@@ -1,4 +1,6 @@
+import contextlib
 import ctypes
+from pathlib import Path
 
 import pytest
 
@@ -395,6 +397,7 @@ def test_drag_coordinate_signature_mocked(monkeypatch):
     monkeypatch.setattr(engine, "IsWindow", lambda h: True)
     monkeypatch.setattr(engine, "GetForegroundWindow", lambda: 12345)
     monkeypatch.setattr(engine, "get_window_rect", lambda h: {"left": 100, "top": 100, "width": 800, "height": 600})
+    monkeypatch.setattr(engine, "ensure_point", lambda h, x, y: calls.append(("point", x, y)))
     monkeypatch.setattr(engine, "move_cursor", lambda x, y: calls.append(("move", x, y)))
     monkeypatch.setattr(engine, "_send", lambda *args: calls.append(("send", len(args))))
     monkeypatch.setattr(engine, "SetCursorPos", lambda x, y: calls.append(("cursor", x, y)))
@@ -405,6 +408,7 @@ def test_drag_coordinate_signature_mocked(monkeypatch):
     assert res["from"] == (10, 20)
     assert res["to"] == (50, 60)
     assert res["steps"] == 5
+    assert ("point", 110, 120) in calls and ("point", 150, 160) in calls
 
 
 def test_drag_inactive_window_without_foreground_raises(monkeypatch):
@@ -430,6 +434,7 @@ def test_drag_button_released_on_exception(monkeypatch):
     monkeypatch.setattr(engine, "IsWindow", lambda h: True)
     monkeypatch.setattr(engine, "GetForegroundWindow", lambda: 12345)
     monkeypatch.setattr(engine, "get_window_rect", lambda h: {"left": 0, "top": 0, "width": 800, "height": 600})
+    monkeypatch.setattr(engine, "ensure_point", lambda h, x, y: None)
     monkeypatch.setattr(engine, "move_cursor", lambda x, y: None)
     monkeypatch.setattr(engine, "_send", lambda *args: calls.append("send"))
     monkeypatch.setattr(engine.time, "sleep", lambda s: None)
@@ -450,10 +455,153 @@ def test_scroll_physical_mocked(monkeypatch):
     calls = []
     monkeypatch.setattr(engine, "IsWindow", lambda h: True)
     monkeypatch.setattr(engine, "GetForegroundWindow", lambda: 12345)
+    monkeypatch.setattr(engine, "get_window_rect", lambda h: {"left": 0, "top": 0, "width": 800, "height": 600})
+    monkeypatch.setattr(engine, "ensure_input_target", lambda h: None)
+    monkeypatch.setattr(engine, "ensure_point", lambda h, x, y: None)
     monkeypatch.setattr(engine, "scroll_at", lambda x, y, direction, amount: calls.append((x, y, direction, amount)))
 
     res = engine.scroll(delta_y=-3, delta_x=2, hwnd=12345, foreground=True)
     assert res["success"] is True
     assert ("down", 3) in [(c[2], c[3]) for c in calls]
     assert ("right", 2) in [(c[2], c[3]) for c in calls]
+    assert {(c[0], c[1]) for c in calls} == {(400, 300)}  # The window's center, not wherever the cursor was.
 
+
+
+@pytest.fixture
+def fake_desktop(monkeypatch):
+    """A desktop where window 12345 is in front; every input is recorded instead of sent."""
+    state = {"foreground": 12345, "sent": []}
+    monkeypatch.setattr(engine, "GetForegroundWindow", lambda: state["foreground"])
+    monkeypatch.setattr(engine, "IsWindow", lambda h: True)
+    monkeypatch.setattr(engine, "describe", lambda h: f"hwnd {h}")
+    monkeypatch.setattr(engine, "get_window_rect", lambda h: {"left": 0, "top": 0, "width": 800, "height": 600})
+    monkeypatch.setattr(engine, "ensure_point", lambda h, x, y: None)
+    monkeypatch.setattr(engine, "SetCursorPos", lambda x, y: state["sent"].append(("cursor", x, y)))
+    monkeypatch.setattr(engine, "_send", lambda *inputs: state["sent"].append(("send", len(inputs))))
+    monkeypatch.setattr(engine.time, "sleep", lambda s: None)
+    return state
+
+
+def _contended_lock(state, new_foreground):
+    """The lock is granted only after another agent brought its own window forward."""
+
+    @contextlib.contextmanager
+    def lock(timeout_ms=5000):
+        state["foreground"] = new_foreground
+        yield
+
+    return lock
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        lambda: engine.click(hwnd=12345, x=10, y=10),
+        lambda: engine.mouse_move(x=10, y=10, hwnd=12345),
+        lambda: engine.type_text("abc", hwnd=12345),
+        lambda: engine.press_key("ctrl+s", hwnd=12345),
+        lambda: engine.scroll(delta_y=-3, hwnd=12345),
+        lambda: engine.drag(start=10, end=20, to_x=50, to_y=60, hwnd=12345),
+        lambda: engine.drag(start=(10, 20), end=(50, 60), hwnd=12345),
+    ],
+    ids=["click", "mouse_move", "type_text", "press_key", "scroll", "drag", "drag_tuple"],
+)
+def test_foreground_is_checked_after_the_lock_is_granted(monkeypatch, fake_desktop, action):
+    # Checked before waiting for the lock, the target was in front; once granted, another window is.
+    monkeypatch.setattr(engine, "input_lock", _contended_lock(fake_desktop, 99999))
+    with pytest.raises(ComputerError, match="requiert la mise au premier plan"):
+        action()
+    assert fake_desktop["sent"] == []
+
+
+def test_input_target_holds_the_lock_from_activation_to_the_last_input(monkeypatch):
+    events = []
+
+    @contextlib.contextmanager
+    def lock(timeout_ms=5000):
+        events.append("lock")
+        yield
+        events.append("unlock")
+
+    monkeypatch.setattr(engine, "input_lock", lock)
+    monkeypatch.setattr(engine, "ensure_input_target", lambda h: events.append("front"))
+    monkeypatch.setattr(engine, "ensure_point", lambda h, x, y: events.append(("point", x, y)))
+    with engine.input_target(42, (1, 2), (3, 4)):
+        events.append("input")
+    assert events == ["lock", "front", ("point", 1, 2), ("point", 3, 4), "input", "unlock"]
+
+
+def test_input_target_never_activates_without_permission(monkeypatch, fake_desktop):
+    monkeypatch.setattr(engine, "ensure_input_target", lambda h: pytest.fail("foreground taken without foreground=True"))
+    fake_desktop["foreground"] = 99999
+    with pytest.raises(ComputerError, match="passez foreground=True"):
+        with engine.input_target(12345, activate=False):
+            pytest.fail("input sent to a window that is not in front")
+
+
+@pytest.mark.parametrize("name", ["server.py", "adapters/claude/server.py", "adapters/codex/server.py"])
+def test_adapters_send_physical_input_only_inside_input_target(name):
+    source = (Path(__file__).resolve().parents[1] / name).read_text(encoding="utf-8")
+    assert "ensure_input_target" not in source  # Activation outside the transaction reopens the race.
+    assert source.count("engine.input_target(") == 7
+
+
+def test_legacy_element_from_another_window_is_stale(monkeypatch, fake_desktop):
+    control = object()
+    monkeypatch.setattr(engine.SESSION, "elements", {1: control})
+    monkeypatch.setattr(engine.SESSION, "elements_hwnd", 99999)
+    monkeypatch.setattr(engine, "_element_cache", {1: control})
+    monkeypatch.setattr(engine, "_cached_window_hwnd", 99999)
+    monkeypatch.setattr(engine, "background_activate", lambda c: pytest.fail("element of another window activated"))
+    for action in (
+        lambda: engine.click(hwnd=12345, element_index=1, foreground=True),
+        lambda: engine.type_text("abc", hwnd=12345, element_index=1, foreground=True),
+        lambda: engine.scroll(delta_y=-1, hwnd=12345, element_index=1, foreground=True),
+    ):
+        with pytest.raises(ComputerError, match="STALE_ELEMENT"):
+            action()
+    assert fake_desktop["sent"] == []
+
+
+def test_legacy_physical_click_reuses_the_checked_element(monkeypatch, fake_desktop):
+    class Rect:
+        left, top, right, bottom = 100, 200, 140, 220
+
+    class Control:
+        BoundingRectangle = Rect()
+
+    stale = Control()
+    stale.BoundingRectangle = None  # Any lookup outside the checked listing would fail.
+    monkeypatch.setattr(engine.SESSION, "elements", {1: Control()})
+    monkeypatch.setattr(engine.SESSION, "elements_hwnd", 12345)
+    monkeypatch.setattr(engine, "_element_cache", {1: stale})
+    monkeypatch.setattr(engine, "_cached_window_hwnd", 0)
+    monkeypatch.setattr(engine, "ensure_input_target", lambda h: None)
+    clicks = []
+    monkeypatch.setattr(engine, "click_at", lambda x, y, button, count: clicks.append((x, y, button, count)))
+    res = engine.click(hwnd=12345, element_index=1, button="right", foreground=True)
+    assert res["method"] == "physical_click"
+    assert clicks == [(120, 210, "right", 1)]
+
+
+def test_legacy_press_key_errors_are_computer_errors(fake_desktop):
+    for keys, message in (("", "Combinaison de touches vide"), ("ctrl+invalidkey123", "Touche inconnue")):
+        with pytest.raises(ComputerError, match=message):
+            engine.press_key(keys)
+    fake_desktop["foreground"] = 99999
+    with pytest.raises(ComputerError, match="requiert la mise au premier plan"):
+        engine.press_key("ctrl+s", hwnd=12345)
+    assert fake_desktop["sent"] == []
+
+
+def test_legacy_press_key_keeps_its_aliases(fake_desktop):
+    for alias, vk in (("cmd", 0x5B), ("page_up", 0x21), ("page_down", 0x22), ("return", 0x0D), ("esc", 0x1B)):
+        assert engine.press_key(f"ctrl + {alias}")["vk_codes"] == [engine.VK_CONTROL, vk]
+
+
+def test_drag_tuple_signature_checks_its_window(monkeypatch, fake_desktop):
+    monkeypatch.setattr(engine, "IsWindow", lambda h: False)
+    with pytest.raises(ComputerError, match="introuvable"):
+        engine.drag(start=(10, 20), end=(50, 60), hwnd=777)
+    assert fake_desktop["sent"] == []

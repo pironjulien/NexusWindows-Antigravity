@@ -226,12 +226,12 @@ def computer_click(
         if method == "uia":
             raise ComputerError(f"{label} does not support UI Automation click. Try mouse click with foreground=True.")
         _require_foreground(foreground, f"Click on {label}")
-        engine.ensure_input_target(target)
-        center = engine.element_center(control, engine.current_frame(target))
-        if center is None:
-            raise ComputerError(f"{label} is not currently visible in window.")
-        engine.ensure_point(target, *center)
-        engine.click_at(*center, button=button, count=click_count)
+        with engine.input_target(target):
+            center = engine.element_center(control, engine.current_frame(target))
+            if center is None:
+                raise ComputerError(f"{label} is not currently visible in window.")
+            engine.ensure_point(target, *center)
+            engine.click_at(*center, button=button, count=click_count)
         return _done(target, f"Physical mouse click {button} x{click_count} on {label}.", screenshot_after, settle_ms)
 
     if x is None or y is None:
@@ -240,9 +240,8 @@ def computer_click(
     frame.check(x, y)
     _require_foreground(foreground, "Click at coordinates")
     point = frame.to_screen(x, y)
-    engine.ensure_input_target(target)
-    engine.ensure_point(target, *point)
-    engine.click_at(*point, button=button, count=click_count)
+    with engine.input_target(target, point):
+        engine.click_at(*point, button=button, count=click_count)
     return _done(target, f"Physical click {button} x{click_count} at ({x},{y}).", screenshot_after, settle_ms)
 
 
@@ -261,9 +260,8 @@ def computer_move_mouse(
     frame.check(x, y)
     _require_foreground(foreground, "Mouse hover")
     point = frame.to_screen(x, y)
-    engine.ensure_input_target(target)
-    engine.ensure_point(target, *point)
-    engine.move_cursor(*point)
+    with engine.input_target(target, point):
+        engine.move_cursor(*point)
     return _done(target, f"Cursor moved to ({x},{y}).", screenshot_after, settle_ms)
 
 
@@ -306,16 +304,15 @@ def computer_type_text(
                 settle_ms,
             )
         _require_foreground(foreground, f"Keyboard input into [{element_index}]")
-        engine.ensure_input_target(target)
-        if not engine.focus_element(control):
-            raise ComputerError(f"[{element_index}] could not receive keyboard focus. Re-inspect window state.")
     else:
         _require_foreground(foreground, "Keyboard input without element_index")
-        engine.ensure_input_target(target)
-    if clear_first:
-        engine.press_combo("ctrl+a")
-        engine.press_combo("backspace")
-    engine.type_unicode(text)
+    with engine.input_target(target):
+        if element_index is not None and not engine.focus_element(control):
+            raise ComputerError(f"[{element_index}] could not receive keyboard focus. Re-inspect window state.")
+        if clear_first:
+            engine.press_combo("ctrl+a")
+            engine.press_combo("backspace")
+        engine.type_unicode(text)
     return _done(target, f"Typed {len(text)} characters via keyboard.", screenshot_after, settle_ms)
 
 
@@ -337,10 +334,10 @@ def computer_press_key(
         engine.parse_combo(combo)
     target = engine.resolve_target(hwnd)
     _require_foreground(foreground, "Keyboard shortcut")
-    engine.ensure_input_target(target)
-    for _ in range(repeat):
-        for combo in combos:
-            engine.press_combo(combo)
+    with engine.input_target(target):
+        for _ in range(repeat):
+            for combo in combos:
+                engine.press_combo(combo)
     return _done(
         target,
         f"Keys sent: {keys}" + (f" x{repeat}" if repeat > 1 else "") + ".",
@@ -393,9 +390,8 @@ def computer_scroll(
         frame = engine.current_frame(target)
         point = (frame.left + frame.width // 2, frame.top + frame.height // 2)
     _require_foreground(foreground, "Mouse wheel scroll")
-    engine.ensure_input_target(target)
-    engine.ensure_point(target, *point)
-    engine.scroll_at(*point, direction, amount)
+    with engine.input_target(target, point):
+        engine.scroll_at(*point, direction, amount)
     return _done(target, f"Scrolled mouse wheel {direction} x{amount}.", screenshot_after, settle_ms)
 
 
@@ -417,10 +413,8 @@ def computer_drag(
     frame.check(to_x, to_y)
     _require_foreground(foreground, "Drag and drop")
     start, end = frame.to_screen(from_x, from_y), frame.to_screen(to_x, to_y)
-    engine.ensure_input_target(target)
-    engine.ensure_point(target, *start)
-    engine.ensure_point(target, *end)
-    engine.drag(start, end)
+    with engine.input_target(target, start, end):
+        engine.drag(start, end)
     return _done(target, f"Dragged from ({from_x},{from_y}) to ({to_x},{to_y}).", screenshot_after, settle_ms)
 
 
