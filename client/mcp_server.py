@@ -464,11 +464,13 @@ def computer_get_window_state(
     capture_screenshot: bool = False,
     output_path: str | None = None,
     max_depth: int = 30,
+    annotate_screenshot: bool = False,
 ) -> str:
     """Extrait l'état complet de la fenêtre ciblée (ou fenêtre active) :
     - Arbre UI Automation compact avec marqueurs Set-of-Marks [#1], [#2]...
     - Type de contrôle, libellé textuel, valeur actuelle, centre relatif et coordonnées spatiales Gemini box_2d [ymin, xmin, ymax, xmax] (0-1000).
     - Capture WebP haute résolution compressée sous 200 Ko (Règle Anti-Crash 400 garantie) si capture_screenshot=True ou output_path fourni.
+    - annotate_screenshot=True : superpose visuellement les bounding boxes et badges [#N] directement sur l'image WebP.
     - Profondeur max d'exploration UIA (max_depth=30 par défaut avec budget temps 1.618s et élagage spatial).
     """
     return _format_computer_result(
@@ -478,6 +480,7 @@ def computer_get_window_state(
         capture_screenshot=capture_screenshot,
         output_path=output_path,
         max_depth=max_depth,
+        annotate_screenshot=annotate_screenshot,
     )
 
 
@@ -501,6 +504,29 @@ def computer_click(
         y=y,
         button=button,
         click_count=click_count,
+    )
+
+
+@_register_computer_tool
+def computer_mouse_move(
+    x: int,
+    y: int,
+    hwnd: int | None = None,
+    smooth: bool = True,
+    steps: int = 10,
+    duration_ms: int = 200,
+) -> str:
+    """Déplace le curseur de la souris vers des coordonnées (x, y) relatives à la fenêtre ou absolues à l'écran.
+    Supporte le déplacement fluide ease-in-out (smooth=True) pour survoler des éléments sans téléportation brutale.
+    """
+    return _format_computer_result(
+        computer_client.mouse_move,
+        x=x,
+        y=y,
+        hwnd=hwnd,
+        smooth=smooth,
+        steps=steps,
+        duration_ms=duration_ms,
     )
 
 
@@ -579,21 +605,33 @@ def computer_take_screenshot(
     hwnd: int | None = None,
     full_screen: bool = False,
     output_path: str | None = None,
+    annotate_screenshot: bool = False,
 ) -> str:
     """Prend une capture d'écran de la fenêtre ciblée ou du bureau complet Windows.
     Garantie Anti-Crash 400 : compressée en WebP sous 200 Ko, enregistrée vers output_path ou cache local.
+    annotate_screenshot=True : dessine les badges Set-of-Marks [#N] et bounding boxes sur la capture.
     """
 
     def _action() -> dict[str, Any]:
         import time
 
+        elements_to_draw = None
+        if annotate_screenshot:
+            target_hwnd = hwnd or computer_client.user32.GetForegroundWindow()
+            state = computer_client.get_window_state(hwnd=target_hwnd, capture_screenshot=False)
+            elements_to_draw = state.get("elements")
+
         data_bytes, meta = computer_client.capture_window_image(
-            hwnd=hwnd, full_screen=full_screen, return_meta=True
+            hwnd=hwnd,
+            full_screen=full_screen,
+            return_meta=True,
+            elements_to_annotate=elements_to_draw,
         )
         dest_path = output_path
         if not dest_path:
             cache_dir = Path.home() / ".nexusagy" / "screenshots"
             cache_dir.mkdir(parents=True, exist_ok=True)
+            computer_client.cleanup_screenshot_cache(max_files=50, max_age_hours=24.0)
             timestamp = int(time.time() * 1000)
             dest_path = str(cache_dir / f"screenshot_{timestamp}.webp")
 
@@ -606,6 +644,7 @@ def computer_take_screenshot(
             "dimensions": meta.get("captured_size"),
             "original_bounds": meta.get("original_bounds"),
             "scale_factor": meta.get("scale_factor"),
+            "annotated": annotate_screenshot,
         }
 
     return _format_computer_result(_action)

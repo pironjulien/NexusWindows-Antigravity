@@ -793,10 +793,10 @@ def click(
             try:
                 invoke_pat = ctrl.GetInvokePattern()
                 if invoke_pat:
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                        fut = executor.submit(invoke_pat.Invoke)
-                        fut.result(timeout=1.0)
+                    import threading
+                    t = threading.Thread(target=invoke_pat.Invoke, daemon=True)
+                    t.start()
+                    t.join(timeout=0.15)
                     return {"success": True, "method": "uia_invoke", "element_index": element_index}
             except Exception:
                 pass
@@ -832,9 +832,21 @@ def type_text(
     ensure_default_desktop()
     target_hwnd = hwnd or user32.GetForegroundWindow()
 
-    # Automatically ensure target window is in the foreground
+    # Automatically ensure target window is in the foreground and verified
     if target_hwnd and user32.GetForegroundWindow() != target_hwnd:
         focus_window(hwnd=target_hwnd)
+        for _ in range(5):
+            if user32.GetForegroundWindow() == target_hwnd:
+                break
+            time.sleep(0.04)
+        current_fg = user32.GetForegroundWindow()
+        if current_fg != target_hwnd:
+            raise RuntimeError(
+                f"Impossible d'activer la fenêtre cible (HWND={target_hwnd}) au premier plan avant la saisie (fenêtre active : HWND={current_fg})."
+            )
+
+    # Normalize newlines so Windows \r\n does not send Enter twice
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
 
     # Direct UIA value replacement if element supported
     if element_index is not None and element_index in _element_cache:
@@ -857,7 +869,7 @@ def type_text(
         press_key("backspace", hwnd=target_hwnd)
 
     for char in text:
-        if char in ("\n", "\r"):
+        if char == "\n":
             press_key("enter", hwnd=target_hwnd)
             time.sleep(0.01)
         else:
@@ -882,9 +894,18 @@ def press_key(keys: str, hwnd: int | None = None) -> dict[str, Any]:
     ensure_default_desktop()
     target_hwnd = hwnd or user32.GetForegroundWindow()
 
-    # Automatically ensure target window is in the foreground
+    # Automatically ensure target window is in the foreground and verified
     if target_hwnd and user32.GetForegroundWindow() != target_hwnd:
         focus_window(hwnd=target_hwnd)
+        for _ in range(5):
+            if user32.GetForegroundWindow() == target_hwnd:
+                break
+            time.sleep(0.04)
+        current_fg = user32.GetForegroundWindow()
+        if current_fg != target_hwnd:
+            raise RuntimeError(
+                f"Impossible d'activer la fenêtre cible (HWND={target_hwnd}) au premier plan avant la combinaison de touches (fenêtre active : HWND={current_fg})."
+            )
 
     parts = [k.strip().lower() for k in keys.split("+") if k.strip()]
     if not parts:

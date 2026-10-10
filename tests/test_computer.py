@@ -1,6 +1,7 @@
 import json
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -106,22 +107,23 @@ def test_mcp_modular_scopes():
     combined_tools = [t.name for t in mcp_server.combined_mcp._tool_manager.list_tools()]
 
     assert len(browser_tools) == 32
-    assert len(computer_tools) == 12
-    assert len(combined_tools) == 44
+    assert len(computer_tools) == 13
+    assert len(combined_tools) == 45
     assert all(name.startswith("browser_") for name in browser_tools)
     assert all(name.startswith("computer_") for name in computer_tools)
     assert set(browser_tools).union(set(computer_tools)) == set(combined_tools)
 
 
 def test_press_key_punctuation():
-    # Should resolve punctuation keys properly via VkKeyScanW without ValueError
-    res = computer_client.press_key("ctrl+,")
-    assert res["success"] is True
-    assert len(res["vk_codes"]) >= 2
+    # Should resolve punctuation keys properly via VkKeyScanW without hardware side-effects
+    with patch.object(computer_client, "_send_inputs", return_value=2):
+        res = computer_client.press_key("ctrl+,")
+        assert res["success"] is True
+        assert len(res["vk_codes"]) >= 2
 
-    res_dot = computer_client.press_key("ctrl+.")
-    assert res_dot["success"] is True
-    assert len(res_dot["vk_codes"]) >= 2
+        res_dot = computer_client.press_key("ctrl+.")
+        assert res_dot["success"] is True
+        assert len(res_dot["vk_codes"]) >= 2
 
 
 def test_dwm_bounds_accurate():
@@ -133,9 +135,11 @@ def test_dwm_bounds_accurate():
 
 
 def test_mouse_move_smooth():
-    res = computer_client.mouse_move(x=10, y=10, smooth=True, steps=3, duration_ms=10)
-    assert res["success"] is True
-    assert res["smooth"] is True
+    # Verify smooth calculation without displacing the user's physical mouse cursor
+    with patch.object(computer_client.user32, "SetCursorPos", return_value=1):
+        res = computer_client.mouse_move(x=10, y=10, smooth=True, steps=3, duration_ms=10)
+        assert res["success"] is True
+        assert res["smooth"] is True
 
 
 def test_cleanup_screenshot_cache():

@@ -7,6 +7,14 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 ## [2.1.0] - 2026-10-10
 
 ### Corrigé
+- **Découplage Asynchrone de `InvokePattern` & Prévention du Double-Clic (`client/computer_client.py`)** :
+  - Remplacement de `ThreadPoolExecutor` bloquant par un thread daemon non-bloquant pour `InvokePattern.Invoke()` et suppression du fallback physique intempestif sur les boîtes modales, éliminant tout blocage de 3 s et tout clic dupliqué.
+- **Normalisation des Retours Chariot Windows (`client/computer_client.py`)** :
+  - Remplacement préalable de `\r\n` par `\n` dans `type_text()`, empêchant l'envoi en double de la touche Entrée lors de la soumission de formulaires.
+- **Vérification Stricte du Premier Plan Avant Saisie (`client/computer_client.py`)** :
+  - Contrôle effectif de `GetForegroundWindow() == target_hwnd` après activation, empêchant toute fuite de frappe dans la mauvaise fenêtre en cas de verrou Win32.
+- **Isolation Matérielle des Tests Unitaires (`tests/test_computer.py`)** :
+  - Mock de `_send_inputs` et `SetCursorPos` pendant la suite pytest, éliminant les raccourcis parasites (`Ctrl+,`) et les téléportations de souris sur le bureau utilisateur.
 - **Calibrage Géométrique DWM & Fenêtres Maximisées (`client/computer_client.py`)** :
   - Intégration de `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)` dans `get_window_rect()` éliminant le décalage de 9 pixels des bordures invisibles Win32 sur les fenêtres maximisées.
   - Alignement géométrique parfait entre la capture d'écran, les coordonnées de détection Gemini `box_2d [0-1000]` et les clics relatifs `(x, y)`.
@@ -22,11 +30,13 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
   - Prise en charge du drapeau `KEYEVENTF_EXTENDEDKEY` pour les touches de navigation (Flèches, Inser, Suppr, Début, Fin, PgPréc, PgSuiv).
 - **Routage des Clics, Clic Droit & Focus Automatique (`client/computer_client.py`)** :
   - Basculement automatique sur le clic matériel au centre du contrôle pour les clics droits (`button="right"`) et doubles-clics (`click_count=2`), sans écrasement par `InvokePattern`.
-  - Exécution sécurisée de `InvokePattern.Invoke()` avec timeout (1,0 s) pour éliminer tout blocage potentiel sur les boîtes de dialogue modales.
   - Activation et mise au premier plan automatique de la fenêtre cible lorsque `hwnd` est spécifié et non actif.
   - Prise en charge multi-écrans sans troncature à zéro et enregistrement des captures d'écran dans le cache local `~/.nexusagy/screenshots/` par défaut pour préserver la fenêtre de contexte textuel et éliminer le bruit base64.
 
 ### Ajouté
+- **Exposition MCP Complète des Outils Avancés (`client/mcp_server.py`)** :
+  - Ajout du paramètre `annotate_screenshot: bool = False` dans `computer_get_window_state` et `computer_take_screenshot`.
+  - Nouvel outil MCP autonome `computer_mouse_move(x, y, smooth=True)` portant la suite `nexus-computer` à 13 outils (45 outils au total).
 - **Retransmission Visuelle Set-of-Marks (`annotate_screenshot=True`)** : Tracé Stanford-style des rectangles englobants et badges numérotés `[#N]` directement sur les captures WebP (< 200 Ko).
 - **Déplacement Fluide de Souris (`mouse_move(x, y, smooth=True)`)** : Trajectoire paramétrique ease-in-out pour survol naturel des éléments sans téléportation abrupte.
 - **Rétention Circulaire du Cache de Captures (`cleanup_screenshot_cache`)** : Purge automatique configurable des captures locales (`max_files=50`, `max_age_hours=24.0`) évitant toute accumulation inutile sur disque.
