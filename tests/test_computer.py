@@ -157,3 +157,7 @@ def test_annotate_screenshot_som():
         )
         assert state["hwnd"] == target
         assert "screenshot_path" in state
+
+
+def test_is_point_occluded_validation():
+    assert computer_client.is_point_occluded(0, 0, 0) is False

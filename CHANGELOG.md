@@ -7,6 +7,10 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 ## [2.1.0] - 2026-10-10
 
 ### Corrigé
+- **Exécution Silencieuse en Arrière-Plan (*Background-First UIA*) (`client/computer_client.py`)** :
+  - Priorisation de l'activation directe (`InvokePattern`) et de l'affectation de valeur (`ValuePattern`) sans appel à `focus_window()`, permettant à l'agent d'agir sur des fenêtres en arrière-plan sans voler le focus ni interrompre la frappe de Julien.
+- **Détection de Recouvrement de Fenêtre (*Occlusion Check*) (`client/computer_client.py`)** :
+  - Contrôle systématique via `WindowFromPoint` et `GetAncestor(GA_ROOT)` avant tout clic physique pour refuser l'action si une fenêtre intempestive recouvre le point visé.
 - **Découplage Asynchrone de `InvokePattern` & Prévention du Double-Clic (`client/computer_client.py`)** :
   - Remplacement de `ThreadPoolExecutor` bloquant par un thread daemon non-bloquant pour `InvokePattern.Invoke()` et suppression du fallback physique intempestif sur les boîtes modales, éliminant tout blocage de 3 s et tout clic dupliqué.
 - **Normalisation des Retours Chariot Windows (`client/computer_client.py`)** :

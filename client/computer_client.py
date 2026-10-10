@@ -768,6 +768,19 @@ def mouse_move(
     return {"success": True, "target": (x, y), "screen_coords": (target_screen_x, target_screen_y), "smooth": True}
 
 
+def is_point_occluded(x: int, y: int, target_hwnd: int) -> bool:
+    """Checks whether the screen coordinate (x, y) is covered by another top-level window."""
+    if not target_hwnd:
+        return False
+    pt = POINT(x=x, y=y)
+    hit = user32.WindowFromPoint(pt)
+    if not hit:
+        return False
+    hit_root = user32.GetAncestor(hit, 2)  # GA_ROOT = 2
+    target_root = user32.GetAncestor(target_hwnd, 2)
+    return hit != target_hwnd and hit_root != target_root and hit_root != target_hwnd
+
+
 def click(
     hwnd: int | None = None,
     element_index: int | None = None,
@@ -776,19 +789,18 @@ def click(
     button: str = "left",
     click_count: int = 1,
 ) -> dict[str, Any]:
-    """Clicks an element by index [#N] or clicks relative coordinates (x, y) inside target window."""
+    """Clicks an element by index [#N] or clicks relative coordinates (x, y) inside target window.
+
+    Prioritizes background-friendly UI Automation without stealing user focus whenever possible.
+    """
     ensure_default_desktop()
     target_hwnd = hwnd or user32.GetForegroundWindow()
 
-    # Automatically ensure target window is in the foreground
-    if target_hwnd and user32.GetForegroundWindow() != target_hwnd:
-        focus_window(hwnd=target_hwnd)
-
-    # 1. Deterministic UI Automation element click
+    # 1. Background-first: Deterministic UI Automation element click (NO FOCUS STEAL)
     if element_index is not None and element_index in _element_cache:
         ctrl = _element_cache[element_index]
 
-        # Only attempt InvokePattern for single left-click
+        # Single left-click via InvokePattern operates entirely in background
         if button.lower() == "left" and click_count == 1:
             try:
                 invoke_pat = ctrl.GetInvokePattern()
@@ -801,21 +813,32 @@ def click(
             except Exception:
                 pass
 
+        # If hardware click is required (right-click, double-click, non-invocable), ensure focus and verify occlusion
+        if target_hwnd and user32.GetForegroundWindow() != target_hwnd:
+            focus_window(hwnd=target_hwnd)
+
         try:
-            # Fall back to hardware click on element's center (required for right-click, double-click, etc.)
             rect = ctrl.BoundingRectangle
             cx = (rect.left + rect.right) // 2
             cy = (rect.top + rect.bottom) // 2
+            if target_hwnd and is_point_occluded(cx, cy, target_hwnd):
+                raise RuntimeError(f"Le centre de l'élément [{element_index}] est recouvert par une autre fenêtre.")
             mouse_click(cx, cy, button=button, click_count=click_count)
             return {"success": True, "method": "element_center", "element_index": element_index, "coords": (cx, cy)}
-        except Exception:
+        except Exception as err:
+            if isinstance(err, RuntimeError):
+                raise
             pass
 
-    # 2. Window-relative coordinates (x, y)
+    # 2. Window-relative coordinates (x, y) - requires focus and occlusion check
     if x is not None and y is not None:
+        if target_hwnd and user32.GetForegroundWindow() != target_hwnd:
+            focus_window(hwnd=target_hwnd)
         win_rect = get_window_rect(target_hwnd)
         screen_x = win_rect["left"] + x
         screen_y = win_rect["top"] + y
+        if target_hwnd and is_point_occluded(screen_x, screen_y, target_hwnd):
+            raise RuntimeError(f"Les coordonnées ({screen_x}, {screen_y}) sont recouvertes par une autre fenêtre.")
         mouse_click(screen_x, screen_y, button=button, click_count=click_count)
         return {"success": True, "method": "relative_coordinates", "screen_coords": (screen_x, screen_y)}
 
@@ -828,27 +851,17 @@ def type_text(
     element_index: int | None = None,
     clear_first: bool = False,
 ) -> dict[str, Any]:
-    """Types text using Unicode SendInput or sets UIA ValuePattern directly."""
+    """Types text using Unicode SendInput or sets UIA ValuePattern directly.
+
+    Prioritizes background-friendly UI Automation ValuePattern (no focus steal, no typing interference).
+    """
     ensure_default_desktop()
     target_hwnd = hwnd or user32.GetForegroundWindow()
-
-    # Automatically ensure target window is in the foreground and verified
-    if target_hwnd and user32.GetForegroundWindow() != target_hwnd:
-        focus_window(hwnd=target_hwnd)
-        for _ in range(5):
-            if user32.GetForegroundWindow() == target_hwnd:
-                break
-            time.sleep(0.04)
-        current_fg = user32.GetForegroundWindow()
-        if current_fg != target_hwnd:
-            raise RuntimeError(
-                f"Impossible d'activer la fenêtre cible (HWND={target_hwnd}) au premier plan avant la saisie (fenêtre active : HWND={current_fg})."
-            )
 
     # Normalize newlines so Windows \r\n does not send Enter twice
     text = text.replace("\r\n", "\n").replace("\r", "\n")
 
-    # Direct UIA value replacement if element supported
+    # 1. Background-first: Direct UIA value replacement without stealing user focus
     if element_index is not None and element_index in _element_cache:
         ctrl = _element_cache[element_index]
         try:
@@ -862,6 +875,19 @@ def type_text(
                 return {"success": True, "method": "uia_set_value", "element_index": element_index}
         except Exception:
             pass
+
+    # 2. Hardware Unicode typing fallback (requires window focus and active verification)
+    if target_hwnd and user32.GetForegroundWindow() != target_hwnd:
+        focus_window(hwnd=target_hwnd)
+        for _ in range(5):
+            if user32.GetForegroundWindow() == target_hwnd:
+                break
+            time.sleep(0.04)
+        current_fg = user32.GetForegroundWindow()
+        if current_fg != target_hwnd:
+            raise RuntimeError(
+                f"Impossible d'activer la fenêtre cible (HWND={target_hwnd}) au premier plan avant la saisie (fenêtre active : HWND={current_fg})."
+            )
 
     # Fallback to hardware Unicode typing
     if clear_first:
