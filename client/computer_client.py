@@ -594,9 +594,10 @@ def capture_window_image(
                         right = int(xmax / 1000.0 * img.width)
                         bottom = int(ymax / 1000.0 * img.height)
                         draw.rectangle([left, top, right, bottom], outline=(255, 60, 60), width=1)
-                        badge_w = 16 if el["index"] < 10 else 22
-                        draw.rectangle([left, max(0, top - 11), min(img.width, left + badge_w), top], fill=(255, 60, 60))
-                        draw.text((left + 2, max(0, top - 11)), str(el["index"]), fill=(255, 255, 255))
+                        badge_w = 16 if el["index"] < 10 else (22 if el["index"] < 100 else 28)
+                        badge_h = min(13, max(8, bottom - top))
+                        draw.rectangle([left, top, min(right, left + badge_w), top + badge_h], fill=(255, 60, 60))
+                        draw.text((left + 2, top + 1), str(el["index"]), fill=(255, 255, 255))
             except Exception:
                 pass
 
