@@ -107,6 +107,25 @@ GetClassNameW = _proto(user32, "GetClassNameW", ctypes.c_int, HWND, wintypes.LPW
 GetWindowThreadProcessId = _proto(user32, "GetWindowThreadProcessId", DWORD, HWND, ctypes.POINTER(DWORD))
 AttachThreadInput = _proto(user32, "AttachThreadInput", wintypes.BOOL, DWORD, DWORD, wintypes.BOOL)
 EnumWindows = _proto(user32, "EnumWindows", wintypes.BOOL, WNDENUMPROC, wintypes.LPARAM)
+EnumDesktopWindows = _proto(user32, "EnumDesktopWindows", wintypes.BOOL, HANDLE, WNDENUMPROC, wintypes.LPARAM)
+OpenDesktopW = _proto(user32, "OpenDesktopW", HANDLE, wintypes.LPCWSTR, DWORD, wintypes.BOOL, DWORD)
+SetThreadDesktop = _proto(user32, "SetThreadDesktop", wintypes.BOOL, HANDLE)
+DESKTOP_ALL_ACCESS = 0x01FF
+_hdesk_default = None
+
+
+def ensure_default_desktop() -> bool:
+    """Attaches calling thread to interactive 'Default' desktop on WinSta0."""
+    global _hdesk_default
+    try:
+        if not _hdesk_default:
+            _hdesk_default = OpenDesktopW("Default", 0, False, DESKTOP_ALL_ACCESS)
+        if _hdesk_default:
+            return bool(SetThreadDesktop(_hdesk_default))
+    except Exception:
+        pass
+    return False
+
 GetWindowRect = _proto(user32, "GetWindowRect", wintypes.BOOL, HWND, ctypes.POINTER(RECT))
 GetWindowLongPtrW = _proto(user32, "GetWindowLongPtrW", ctypes.c_ssize_t, HWND, ctypes.c_int)
 WindowFromPoint = _proto(user32, "WindowFromPoint", HWND, POINT)
@@ -328,6 +347,7 @@ def describe(hwnd: int) -> str:
 
 def list_windows() -> list[dict[str, Any]]:
     """Top-level application windows in Z-order (frontmost first)."""
+    ensure_default_desktop()
     windows: list[dict[str, Any]] = []
     active = foreground()
 
@@ -359,7 +379,10 @@ def list_windows() -> list[dict[str, Any]]:
         )
         return True
 
-    EnumWindows(WNDENUMPROC(visit), 0)
+    proc = WNDENUMPROC(visit)
+    EnumWindows(proc, 0)
+    if not windows and _hdesk_default:
+        EnumDesktopWindows(_hdesk_default, proc, 0)
     return windows
 
 
