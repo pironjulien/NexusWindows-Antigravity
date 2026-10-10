@@ -4,6 +4,22 @@ Toutes les modifications notables apportées au projet **Antigravity Computer Us
 
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/), et ce projet adhère au versioning sémantique.
 
+## [2.3.3] - 2026-10-10
+
+### Corrigé
+- **Correction Bloquante `scroll_at` (`core/engine.py`)** :
+  - Alignement de l'appel de défilement physique sur la signature réelle `scroll_at(x, y, direction, amount)`, éliminant l'erreur `TypeError: scroll_at() got an unexpected keyword argument 'vertical'`.
+- **Garantie de Relâchement du Bouton dans `drag()` (`core/engine.py`)** :
+  - Encadrement strict par `try ... finally: _send(_mouse_input(up))` empêchant tout blocage du bouton gauche enfoncé en cas d'interruption ou d'exception en cours de glisser.
+  - Émission systématique de l'événement `MOUSEEVENTF_MOVE` à chaque pas pour tous les formats d'appel.
+- **Verrouillage Mutex Transactionnel & Rejet `INPUT_BUSY` (`core/engine.py`)** :
+  - Le mutex nommé `Local\nexus-computer-input` protège désormais l'intégralité de l'action physique macro (`click_at`, `scroll_at`, `drag`, `_try_foreground`).
+  - En cas de timeout (5 s), le moteur lève formellement une exception `ComputerError("INPUT_BUSY: ...")` plutôt que d'exécuter silencieusement l'action hors verrou.
+- **Élimination de la Faille `STALE_ELEMENT` (`core/engine.py`)** :
+  - Suppression de la condition laxiste `or not _cached_window_hwnd` dans `click()` et `type_text()` : validation stricte de l'appartenance à la fenêtre active (`_cached_window_hwnd == target_hwnd and _cached_window_hwnd != 0`).
+- **Suite de Tests Portée à 72 Tests (100% Succès)** :
+  - Ajout de tests unitaires couvrant le rejet `INPUT_BUSY`, le relâchement garanti dans `drag()` en cas d'erreur, et le défilement physique bidirectionnel.
+
 ## [2.3.2] - 2026-10-10
 
 ### Corrigé

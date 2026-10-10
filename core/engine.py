@@ -181,14 +181,17 @@ def input_lock(timeout_ms: int = 5000):
     mutex_name = "Local\\nexus-computer-input"
     h_mutex = CreateMutexW(None, False, mutex_name)
     if not h_mutex:
-        yield
-        return
+        raise ComputerError("Impossible d'initialiser le mutex système Local\\nexus-computer-input.")
     acquired = False
     try:
         res = WaitForSingleObject(h_mutex, timeout_ms)
         if res in (WAIT_OBJECT_0, WAIT_ABANDONED):
             acquired = True
-        yield
+            yield
+        else:
+            raise ComputerError(
+                f"INPUT_BUSY: Le sous-système d'entrées physiques est occupé par un autre processus après {timeout_ms}ms (code={res})."
+            )
     finally:
         if acquired:
             ReleaseMutex(h_mutex)
@@ -1138,20 +1141,21 @@ def _send(*inputs: INPUT) -> None:
 
 
 def _try_foreground(hwnd: int, with_alt: bool) -> None:
-    current = foreground()
-    own_thread = GetCurrentThreadId()
-    other_thread = GetWindowThreadProcessId(current, None) if current else 0
-    attached = bool(other_thread and other_thread != own_thread and AttachThreadInput(own_thread, other_thread, True))
-    try:
-        if with_alt:  # A held Alt key lifts the foreground lock for the next SetForegroundWindow.
-            _send(_key_input(VK_MENU, up=False))
-        BringWindowToTop(hwnd)
-        SetForegroundWindow(hwnd)
-        if with_alt:
-            _send(_key_input(VK_MENU, up=True))
-    finally:
-        if attached:
-            AttachThreadInput(own_thread, other_thread, False)
+    with input_lock(timeout_ms=1000):
+        current = foreground()
+        own_thread = GetCurrentThreadId()
+        other_thread = GetWindowThreadProcessId(current, None) if current else 0
+        attached = bool(other_thread and other_thread != own_thread and AttachThreadInput(own_thread, other_thread, True))
+        try:
+            if with_alt:  # A held Alt key lifts the foreground lock for the next SetForegroundWindow.
+                _send(_key_input(VK_MENU, up=False))
+            BringWindowToTop(hwnd)
+            SetForegroundWindow(hwnd)
+            if with_alt:
+                _send(_key_input(VK_MENU, up=True))
+        finally:
+            if attached:
+                AttachThreadInput(own_thread, other_thread, False)
 
 
 def give_foreground(hwnd: int) -> threading.Thread | None:
@@ -1434,12 +1438,13 @@ def click_at(x: int, y: int, button: str = "left", count: int = 1) -> None:
     if not 1 <= count <= 3:
         raise ComputerError("click_count doit valoir 1, 2 ou 3.")
     down, up = _BUTTONS[button]
-    move_cursor(x, y)
-    for _ in range(count):
-        _send(_mouse_input(down))
-        time.sleep(0.02)
-        _send(_mouse_input(up))
-        time.sleep(0.04)
+    with input_lock():
+        move_cursor(x, y)
+        for _ in range(count):
+            _send(_mouse_input(down))
+            time.sleep(0.02)
+            _send(_mouse_input(up))
+            time.sleep(0.04)
 
 
 def scroll_at(x: int, y: int, direction: str, amount: int) -> None:
@@ -1451,10 +1456,11 @@ def scroll_at(x: int, y: int, direction: str, amount: int) -> None:
     }.get(direction, (None, 0))
     if flags is None:
         raise ComputerError(f"Direction inconnue : {direction!r} (up, down, left, right).")
-    move_cursor(x, y)
-    for _ in range(max(1, min(amount, 50))):
-        _send(_mouse_input(flags, sign * WHEEL_DELTA))
-        time.sleep(0.02)
+    with input_lock():
+        move_cursor(x, y)
+        for _ in range(max(1, min(amount, 50))):
+            _send(_mouse_input(flags, sign * WHEEL_DELTA))
+            time.sleep(0.02)
 
 
 def drag(
@@ -1473,22 +1479,32 @@ def drag(
     Supports both Claude tuple signature (start=(x1, y1), end=(x2, y2), steps=20)
     and Antigravity signature (from_x, from_y, to_x, to_y, hwnd=..., steps=20).
     """
+    cur_fg = _handle(GetForegroundWindow())
+    target_hwnd = hwnd or cur_fg
+
     if isinstance(start, (tuple, list)) and isinstance(end, (tuple, list)):
+        if target_hwnd and cur_fg != target_hwnd and not foreground:
+            raise ComputerError(
+                "Le glisser-déposer à la souris requiert la mise au premier plan. "
+                "Pour ne pas interrompre le travail de Julien, passez foreground=True."
+            )
         with input_lock():
             down, up = _BUTTONS["left"]
             move_cursor(*start)
             _send(_mouse_input(down))
             time.sleep(0.08)
-            for step in range(1, steps + 1):
-                SetCursorPos(
-                    round(start[0] + (end[0] - start[0]) * step / steps),
-                    round(start[1] + (end[1] - start[1]) * step / steps),
-                )
-                _send(_mouse_input(MOUSEEVENTF_MOVE))
-                time.sleep(0.012)
-            time.sleep(0.05)
-            _send(_mouse_input(up))
-            return None
+            try:
+                for step in range(1, steps + 1):
+                    SetCursorPos(
+                        round(start[0] + (end[0] - start[0]) * step / steps),
+                        round(start[1] + (end[1] - start[1]) * step / steps),
+                    )
+                    _send(_mouse_input(MOUSEEVENTF_MOVE))
+                    time.sleep(0.012)
+                time.sleep(0.05)
+            finally:
+                _send(_mouse_input(up))
+        return None
 
     ensure_default_desktop()
     from_x = int(start)
@@ -1496,8 +1512,6 @@ def drag(
     target_to_x = int(to_x if to_x is not None else from_x)
     target_to_y = int(to_y if to_y is not None else from_y)
 
-    cur_fg = _handle(GetForegroundWindow())
-    target_hwnd = hwnd or cur_fg
     if not target_hwnd or not IsWindow(target_hwnd):
         raise ComputerError("Fenêtre cible introuvable pour le glisser-déposer.")
 
@@ -1517,13 +1531,16 @@ def drag(
         down, up = _BUTTONS["left"]
         _send(_mouse_input(down))
         time.sleep(0.02)
-        for i in range(1, steps + 1):
-            cur_x = int(s_from_x + (s_to_x - s_from_x) * (i / steps))
-            cur_y = int(s_from_y + (s_to_y - s_from_y) * (i / steps))
-            SetCursorPos(cur_x, cur_y)
-            if delay_ms > 0:
-                time.sleep(delay_ms / 1000.0)
-        _send(_mouse_input(up))
+        try:
+            for i in range(1, steps + 1):
+                cur_x = int(s_from_x + (s_to_x - s_from_x) * (i / steps))
+                cur_y = int(s_from_y + (s_to_y - s_from_y) * (i / steps))
+                SetCursorPos(cur_x, cur_y)
+                _send(_mouse_input(MOUSEEVENTF_MOVE))
+                if delay_ms > 0:
+                    time.sleep(delay_ms / 1000.0)
+        finally:
+            _send(_mouse_input(up))
     return {"success": True, "from": (from_x, from_y), "to": (target_to_x, target_to_y), "steps": steps}
 
 
@@ -1980,7 +1997,7 @@ def click(
         ctrl = None
         if target_hwnd and SESSION.elements_hwnd == target_hwnd and element_index in SESSION.elements:
             ctrl = SESSION.elements[element_index]
-        elif element_index in _element_cache and (_cached_window_hwnd == target_hwnd or not _cached_window_hwnd):
+        elif element_index in _element_cache and _cached_window_hwnd == target_hwnd and _cached_window_hwnd != 0:
             ctrl = _element_cache[element_index]
         if ctrl is not None:
             effect = background_activate(ctrl)
@@ -2080,7 +2097,7 @@ def type_text(
         ctrl = None
         if target_hwnd and SESSION.elements_hwnd == target_hwnd and element_index in SESSION.elements:
             ctrl = SESSION.elements[element_index]
-        elif element_index in _element_cache and (_cached_window_hwnd == target_hwnd or not _cached_window_hwnd):
+        elif element_index in _element_cache and _cached_window_hwnd == target_hwnd and _cached_window_hwnd != 0:
             ctrl = _element_cache[element_index]
         if ctrl is not None:
             written = set_value(ctrl, text, append=not clear_first)
@@ -2258,13 +2275,21 @@ def scroll(
             }
 
     if target_hwnd and user32.GetForegroundWindow() != target_hwnd and not foreground:
-        raise RuntimeError(
+        raise ComputerError(
             "Le défilement par molette physique requiert la mise au premier plan. "
             "Pour ne pas interrompre le travail de Julien, passez foreground=True."
         )
     if x is not None and y is not None:
-        rect = get_window_rect(target_hwnd)
+        rect = get_window_rect(target_hwnd) if target_hwnd and IsWindow(target_hwnd) else {"left": 0, "top": 0}
         move_cursor(rect["left"] + x, rect["top"] + y)
 
-    scroll_at((0, 0), vertical=delta_y, horizontal=delta_x)
+    pt = POINT()
+    user32.GetCursorPos(ctypes.byref(pt))
+    scroll_x, scroll_y = pt.x, pt.y
+    if delta_y != 0:
+        dir_y = "up" if delta_y > 0 else "down"
+        scroll_at(scroll_x, scroll_y, dir_y, abs(delta_y))
+    if delta_x != 0:
+        dir_x = "right" if delta_x > 0 else "left"
+        scroll_at(scroll_x, scroll_y, dir_x, abs(delta_x))
     return {"success": True, "delta_y": delta_y, "delta_x": delta_x}

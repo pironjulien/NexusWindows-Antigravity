@@ -413,3 +413,47 @@ def test_drag_inactive_window_without_foreground_raises(monkeypatch):
 
     with pytest.raises(ComputerError, match="requiert la mise au premier plan"):
         engine.drag(start=10, end=20, to_x=50, to_y=60, hwnd=12345, foreground=False)
+
+
+def test_input_lock_timeout_raises_busy(monkeypatch):
+    monkeypatch.setattr(engine, "CreateMutexW", lambda sec, init, name: 1234)
+    monkeypatch.setattr(engine, "WaitForSingleObject", lambda handle, timeout: engine.WAIT_TIMEOUT)
+    monkeypatch.setattr(engine, "CloseHandle", lambda handle: True)
+
+    with pytest.raises(ComputerError, match="INPUT_BUSY"):
+        with engine.input_lock(timeout_ms=100):
+            pass
+
+
+def test_drag_button_released_on_exception(monkeypatch):
+    calls = []
+    monkeypatch.setattr(engine, "IsWindow", lambda h: True)
+    monkeypatch.setattr(engine, "GetForegroundWindow", lambda: 12345)
+    monkeypatch.setattr(engine, "get_window_rect", lambda h: {"left": 0, "top": 0, "width": 800, "height": 600})
+    monkeypatch.setattr(engine, "move_cursor", lambda x, y: None)
+    monkeypatch.setattr(engine, "_send", lambda *args: calls.append("send"))
+    monkeypatch.setattr(engine.time, "sleep", lambda s: None)
+
+    def failing_setpos(x, y):
+        raise RuntimeError("Simulated failure during drag trajectory")
+
+    monkeypatch.setattr(engine, "SetCursorPos", failing_setpos)
+
+    with pytest.raises(RuntimeError, match="Simulated failure"):
+        engine.drag(start=10, end=20, to_x=50, to_y=60, hwnd=12345, steps=5)
+
+    # 1 down + 1 up in finally
+    assert calls.count("send") == 2
+
+
+def test_scroll_physical_mocked(monkeypatch):
+    calls = []
+    monkeypatch.setattr(engine, "IsWindow", lambda h: True)
+    monkeypatch.setattr(engine, "GetForegroundWindow", lambda: 12345)
+    monkeypatch.setattr(engine, "scroll_at", lambda x, y, direction, amount: calls.append((x, y, direction, amount)))
+
+    res = engine.scroll(delta_y=-3, delta_x=2, hwnd=12345, foreground=True)
+    assert res["success"] is True
+    assert ("down", 3) in [(c[2], c[3]) for c in calls]
+    assert ("right", 2) in [(c[2], c[3]) for c in calls]
+
