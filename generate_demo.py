@@ -1,11 +1,12 @@
-import os
-import sys
-import io
-import time
-import subprocess
 import ctypes
+import io
+import os
+import subprocess
+import sys
+import time
 from ctypes import wintypes
 from pathlib import Path
+
 from PIL import Image, ImageDraw, ImageFont
 
 sys.path.insert(0, str(Path(__file__).parent / "client"))

@@ -16,8 +16,15 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
   - Chiffres cernés d'un contour sombre (`stroke_width=1`) pour une lisibilité parfaite sur fond clair ou sombre.
   - Algorithme d'agencement priorisant les plus petits éléments pour éviter tout chevauchement de numéros sur des boutons contigus.
   - Suppression automatique des contours rouges sur les grands conteneurs (> $1/\phi^2 \approx 38\%$ de la surface).
-- **Suite de Tests Élargie (62 tests unitaires + 22 vérifications réelles en arrière-plan)** :
+- **Architecture Tripartite Modulaire à 3 Adaptateurs Dédiés (`adapters/claude/`, `adapters/codex/`, `adapters/antigravity/`)** :
+  - `adapters/claude/` : Adaptateur sur-mesure pour Anthropic Claude (Claude Code et Claude Desktop) avec sorties markdown compactes et badges harmoniques au nombre d'or.
+  - `adapters/codex/` : Adaptateur sur-mesure pour OpenAI Codex et ChatGPT Desktop avec conformité stricte JSON, détection des éléments obsolètes `STALE_ELEMENT` et concision de tokens.
+  - `adapters/antigravity/` : Adaptateur sur-mesure pour Google Antigravity et Gemini Multimodal, intégrant la règle Anti-Crash 400 (< 200 Ko WebP), les boîtes spatiales normalisées `gemini_box_2d [ymin, xmin, ymax, xmax]` (0-1000) et la supervision Spotlight `Alt + Space`.
+  - Moteur unifié `core/engine.py` et `core/spotlight.py` partagé éliminant toute duplication ou dérive entre moteurs.
+  - Point d'entrée racine `server.py` acceptant `--adapter claude|codex|antigravity` avec repli automatique universel pour une rétrocompatibilité totale.
+- **Suite de Tests Élargie (65 tests unitaires et adaptateurs + 22 vérifications réelles en arrière-plan)** :
   - 45 tests unitaires complets dans `tests/test_engine.py`.
+  - 3 tests d'intégration d'adaptateurs dans `tests/test_adapters.py`.
   - Test en direct sans souris ni clavier `tests/live_background.py` (22/22 vérifications réussies).
   - Script d'application de test dédiée avec ouverture au fond de la pile `tests/target_app.ps1 -Behind`.
 

@@ -24,8 +24,9 @@ from mcp.client.stdio import stdio_client
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
-import engine  # noqa: E402
 from live_smoke import APP, LIVE, EventLog, check, decode, find_color, results  # noqa: E402
+
+import engine  # noqa: E402
 
 MAX_AWAY_MS = 100  # Longest the user's window may lose the foreground during one action.
 TEXT = "fond ✓ éàç 🎉"

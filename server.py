@@ -379,6 +379,32 @@ def computer_drag(
 
 
 def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument(
+        "--adapter",
+        choices=["claude", "codex", "antigravity", "universal"],
+        default="universal",
+    )
+    args, _ = parser.parse_known_args()
+
+    if args.adapter == "claude":
+        from adapters.claude.server import main as claude_main
+
+        claude_main()
+        return
+    elif args.adapter == "codex":
+        from adapters.codex.server import main as codex_main
+
+        codex_main()
+        return
+    elif args.adapter == "antigravity":
+        from adapters.antigravity.server import main as antigravity_main
+
+        antigravity_main()
+        return
+
     os.chdir(Path(__file__).resolve().parent)  # uiautomation may drop its log file in the working directory.
     # JSON-RPC owns a private copy of stdout; stray prints (uiautomation logs to the console) go to stderr.
     protocol = os.fdopen(os.dup(sys.stdout.fileno()), "wb")
@@ -395,3 +421,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

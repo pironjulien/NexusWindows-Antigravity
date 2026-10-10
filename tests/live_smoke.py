@@ -196,7 +196,7 @@ async def run() -> None:
             time.sleep(0.3)
             error, text, _ = await call("computer_focus_window", hwnd=hwnd)
             _, listing, _ = await call("computer_list_windows")
-            line = next((l for l in listing.splitlines() if l.startswith(f"hwnd {hwnd} |")), "")
+            line = next((item for item in listing.splitlines() if item.startswith(f"hwnd {hwnd} |")), "")
             check("premier plan repris à un autre processus", not error and "[premier plan]" in line, text[:90])
             processes.pop().kill()
             time.sleep(0.3)
@@ -304,7 +304,7 @@ async def run() -> None:
             processes.append(launch(obstacle_log.path, "-Mode", "Obstacle", "-Title", "Obstacle", "-X", "150", "-Y", "150", "-Width", "600", "-Height", "350"))
             obstacle_log.wait(lambda e: e.get("event") == "obstacle_ready", 20)
             time.sleep(0.4)
-            front = lambda listing: next((l.split(" | ")[0] for l in listing.splitlines() if "[premier plan]" in l), "")  # noqa: E731
+            front = lambda listing: next((item.split(" | ")[0] for item in listing.splitlines() if "[premier plan]" in item), "")  # noqa: E731
             _, listing, _ = await call("computer_list_windows")
             front_before = front(listing)
 
@@ -330,7 +330,7 @@ async def run() -> None:
             await background("arrière-plan : élément de liste sélectionné", {"tool": "computer_click", "element_index": bg_row}, "selected", lambda ev: ev and ev[-1]["index"] == row_number - 1)
             await background("arrière-plan : champ rempli sans clavier", {"tool": "computer_type_text", "element_index": bg_saisie, "text": "fond", "clear_first": True}, None, None)
             _, state, _ = await call("computer_get_window_state", hwnd=hwnd)
-            check("arrière-plan : valeur du champ relue", '= "fond"' in state, next((l for l in state.splitlines() if "Document" in l or "Edit" in l), "")[:90])
+            check("arrière-plan : valeur du champ relue", '= "fond"' in state, next((item for item in state.splitlines() if "Document" in item or "Edit" in item), "")[:90])
             await background("arrière-plan : bouton activé", {"tool": "computer_click", "element_index": bg_valider}, "button", lambda ev: bool(ev))
             error, text = await background("arrière-plan : défilement de la liste", {"tool": "computer_scroll", "element_index": bg_first, "direction": "down", "amount": 3}, None, None)
             _, state, _ = await call("computer_get_window_state", hwnd=hwnd)
@@ -365,7 +365,7 @@ async def run() -> None:
             error, text, _ = await call("computer_press_key", hwnd=hwnd, keys="win+up")
             time.sleep(1.0)
             _, listing, _ = await call("computer_list_windows")
-            line = next((l for l in listing.splitlines() if l.startswith(f"hwnd {hwnd} |")), "")
+            line = next((item for item in listing.splitlines() if item.startswith(f"hwnd {hwnd} |")), "")
             check("win+up agrandit la fenêtre", "agrandie" in line, line[:120])
             error, text, _ = await call("computer_click", hwnd=hwnd, x=5, y=5)
             check("taille changée : refus des anciennes coordonnées", error and "changé de taille" in text, text[:100])
