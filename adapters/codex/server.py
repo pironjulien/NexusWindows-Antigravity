@@ -340,7 +340,24 @@ def computer_type_text(
             raise ComputerError(f"[{element_index}] does not accept UI Automation typing.")
 
     if method == "post_message":
-        ctrl_hwnd = getattr(control, "NativeWindowHandle", 0) if element_index is not None else None
+        if element_index is None:
+            focused = engine.get_focused_child_hwnd(target)
+            if not focused:
+                raise ComputerError(
+                    "No element specified (element_index missing) and no input control has focus "
+                    "in the window to receive post_message input."
+                )
+            ctrl_hwnd = focused
+        else:
+            ctrl_hwnd = getattr(control, "NativeWindowHandle", 0) or None
+            if not ctrl_hwnd and clear_first:
+                try:
+                    val_pat = control.GetValuePattern()
+                    if val_pat:
+                        val_pat.SetValue("")
+                except Exception:
+                    pass
+
         chars = engine.post_message_type(target, text, target_control_hwnd=ctrl_hwnd, clear_first=clear_first)
         val_info = ""
         if element_index is not None:
@@ -348,7 +365,17 @@ def computer_type_text(
                 time.sleep(0.05)
                 val_pat = control.GetValuePattern()
                 if val_pat and val_pat.Value is not None:
-                    val_info = f" (verified value: {val_pat.Value!r})"
+                    current_val = val_pat.Value
+                    norm_text = text.replace("\r\n", "\n").replace("\r", "\n")
+                    norm_val = current_val.replace("\r\n", "\n").replace("\r", "\n")
+                    if norm_text not in norm_val:
+                        raise ComputerError(
+                            f"Typing verification failed in [{element_index}]: read-back value ({current_val!r}) "
+                            f"does not contain expected text ({text!r})."
+                        )
+                    val_info = f" (verified value: {current_val!r})"
+            except ComputerError:
+                raise
             except Exception:
                 pass
         return _done(

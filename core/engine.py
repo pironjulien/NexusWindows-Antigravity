@@ -13,7 +13,6 @@ import ctypes
 import io
 import math
 import os
-import shlex
 import subprocess
 import sys
 import threading
@@ -185,6 +184,41 @@ PostMessageW = _proto(user32, "PostMessageW", wintypes.BOOL, HWND, wintypes.UINT
 SendMessageW = _proto(user32, "SendMessageW", ctypes.c_ssize_t, HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
 ScreenToClient = _proto(user32, "ScreenToClient", wintypes.BOOL, HWND, ctypes.POINTER(POINT))
 RealChildWindowFromPoint = _proto(user32, "RealChildWindowFromPoint", HWND, HWND, POINT)
+IsChild = _proto(user32, "IsChild", wintypes.BOOL, HWND, HWND)
+
+
+class GUITHREADINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("flags", wintypes.DWORD),
+        ("hwndActive", wintypes.HWND),
+        ("hwndFocus", wintypes.HWND),
+        ("hwndCapture", wintypes.HWND),
+        ("hwndMenuOwner", wintypes.HWND),
+        ("hwndMoveSize", wintypes.HWND),
+        ("hwndCaret", wintypes.HWND),
+        ("rcCaret", wintypes.RECT),
+    ]
+
+
+GetGUIThreadInfo = _proto(user32, "GetGUIThreadInfo", wintypes.BOOL, wintypes.DWORD, ctypes.POINTER(GUITHREADINFO))
+SendMessageTimeoutW = _proto(
+    user32,
+    "SendMessageTimeoutW",
+    ctypes.c_ssize_t,
+    HWND,
+    wintypes.UINT,
+    wintypes.WPARAM,
+    wintypes.LPARAM,
+    wintypes.UINT,
+    wintypes.UINT,
+    ctypes.POINTER(ctypes.c_ssize_t),
+)
+
+SMTO_NORMAL = 0x0000
+SMTO_BLOCK = 0x0001
+SMTO_ABORTIFHUNG = 0x0002
+SMTO_NOTIMEOUTIFNOTHUNG = 0x0008
 
 WM_SETTEXT = 0x000C
 WM_MOUSEMOVE = 0x0200
@@ -1594,6 +1628,21 @@ def post_message_click(
     return True
 
 
+def get_focused_child_hwnd(hwnd: int) -> int | None:
+    """Returns the child window currently holding keyboard focus within hwnd's GUI thread, or None."""
+    if not hwnd or not IsWindow(hwnd):
+        return None
+    thread_id = user32.GetWindowThreadProcessId(hwnd, None)
+    if not thread_id:
+        return None
+    gui = GUITHREADINFO()
+    gui.cbSize = ctypes.sizeof(GUITHREADINFO)
+    if GetGUIThreadInfo(thread_id, ctypes.byref(gui)) and gui.hwndFocus and IsWindow(gui.hwndFocus):
+        if gui.hwndFocus != hwnd and (GetAncestor(gui.hwndFocus, GA_ROOT) == hwnd or IsChild(hwnd, gui.hwndFocus)):
+            return gui.hwndFocus
+    return None
+
+
 def post_message_type(
     hwnd: int,
     text: str,
@@ -1601,12 +1650,31 @@ def post_message_type(
     clear_first: bool = False,
 ) -> int:
     """Sends Unicode characters directly to the window message queue via WM_CHAR without focus steal."""
-    target = target_control_hwnd or hwnd
-    if not IsWindow(target):
-        raise ComputerError(f"Fenêtre invalide (hwnd {target}).")
+    if not IsWindow(hwnd):
+        raise ComputerError(f"Fenêtre invalide (hwnd {hwnd}).")
+
+    if target_control_hwnd and IsWindow(target_control_hwnd):
+        target = target_control_hwnd
+    else:
+        focused = get_focused_child_hwnd(hwnd)
+        target = focused if focused and IsWindow(focused) else hwnd
+
     if clear_first:
-        ptr_empty = ctypes.cast(ctypes.c_wchar_p(""), ctypes.c_void_p).value or 0
-        SendMessageW(target, WM_SETTEXT, 0, ptr_empty)
+        # Security & Integrity: NEVER send WM_SETTEXT to a top-level window (which would overwrite its window title!).
+        # Only send WM_SETTEXT to a dedicated child control HWND with a persistent buffer and timeout.
+        if target != hwnd and IsWindow(target):
+            empty_buf = ctypes.create_unicode_buffer("")
+            res_val = ctypes.c_ssize_t(0)
+            SendMessageTimeoutW(
+                target,
+                WM_SETTEXT,
+                0,
+                ctypes.addressof(empty_buf),
+                SMTO_ABORTIFHUNG | SMTO_NORMAL,
+                1000,
+                ctypes.byref(res_val),
+            )
+
     chars_sent = 0
     for char in text:
         if char == "\r":
@@ -1644,28 +1712,32 @@ def launch_app(
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startupinfo.wShowWindow = SW_SHOWMINNOACTIVE
 
-    use_shell = any(op in command for op in ("|", ">", "<", "&"))
+    before_hwnds = {w["hwnd"] for w in list_windows(visible_only=False)}
+
+    # Direct execution without shell: Windows CreateProcessW natively handles quoted paths and arguments.
+    # Fallback to shell=True only if redirection operators are present or command is built-in.
+    use_shell = any(op in command for op in ("|", ">", "<"))
     try:
         if not use_shell:
-            args = shlex.split(command, posix=False)
-            proc = subprocess.Popen(args, startupinfo=startupinfo, shell=False)
+            proc = subprocess.Popen(command, startupinfo=startupinfo, shell=False)
         else:
             proc = subprocess.Popen(command, startupinfo=startupinfo, shell=True)
-    except FileNotFoundError:
+    except (FileNotFoundError, OSError):
         proc = subprocess.Popen(command, startupinfo=startupinfo, shell=True)
 
     detected_hwnd = None
     detected_title = ""
 
-    # Poll up to wait_ms for the window to be created
+    # Poll up to wait_ms for the window to be created, comparing before/after windows
     poll_time = max(0.1, wait_ms / 1000.0) if wait_ms > 0 else 0.1
     deadline = time.time() + poll_time
     while time.time() < deadline:
         try:
-            candidates = []
-            for win in list_windows(visible_only=False):
-                if win["pid"] == proc.pid:
-                    candidates.append(win)
+            current_windows = list_windows(visible_only=False)
+            new_candidates = [w for w in current_windows if w["hwnd"] not in before_hwnds]
+            pid_candidates = [w for w in (new_candidates or current_windows) if w["pid"] == proc.pid]
+            candidates = pid_candidates or new_candidates
+
             if candidates:
                 main_win = None
                 for w in candidates:
@@ -2342,7 +2414,24 @@ def type_text(
             raise ComputerError(f"L'élément [{element_index}] ne supporte pas ValuePattern.")
 
     if method == "post_message":
-        ctrl_hwnd = getattr(ctrl, "NativeWindowHandle", 0) if ctrl is not None else None
+        if element_index is None:
+            focused = get_focused_child_hwnd(target_hwnd)
+            if not focused:
+                raise ComputerError(
+                    "Aucun contrôle spécifié (element_index manquant) et aucun champ de saisie n'a le focus "
+                    "dans la fenêtre pour recevoir la saisie post_message."
+                )
+            ctrl_hwnd = focused
+        else:
+            ctrl_hwnd = getattr(ctrl, "NativeWindowHandle", 0) if ctrl is not None else None
+            if not ctrl_hwnd and ctrl is not None and clear_first:
+                try:
+                    val_pat = ctrl.GetValuePattern()
+                    if val_pat:
+                        val_pat.SetValue("")
+                except Exception:
+                    pass
+
         chars = post_message_type(target_hwnd, text, target_control_hwnd=ctrl_hwnd, clear_first=clear_first)
         verified_val = None
         if ctrl is not None:
@@ -2350,7 +2439,17 @@ def type_text(
                 time.sleep(0.05)
                 val_pat = ctrl.GetValuePattern()
                 if val_pat and val_pat.Value is not None:
-                    verified_val = val_pat.Value
+                    current_val = val_pat.Value
+                    norm_text = text.replace("\r\n", "\n").replace("\r", "\n")
+                    norm_val = current_val.replace("\r\n", "\n").replace("\r", "\n")
+                    if norm_text not in norm_val:
+                        raise ComputerError(
+                            f"Échec de la saisie dans [{element_index}] : la valeur relue ({current_val!r}) "
+                            f"ne contient pas le texte attendu ({text!r})."
+                        )
+                    verified_val = current_val
+            except ComputerError:
+                raise
             except Exception:
                 pass
         result_payload = {

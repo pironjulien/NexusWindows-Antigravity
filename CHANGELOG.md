@@ -4,6 +4,25 @@ Toutes les modifications notables apportées au projet **Antigravity Computer Us
 
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/), et ce projet adhère au versioning sémantique.
 
+## [2.4.2] - 2026-10-11
+
+### Corrigé
+- **Protection Intègre du Titre de Fenêtre & Sécurité Mémoire dans `clear_first` (`WM_SETTEXT`)** :
+  - `WM_SETTEXT` n'est désormais **jamais** envoyé au handle de fenêtre racine (`target != hwnd`), éliminant l'écrasement intempestif du titre de la fenêtre lors d'une saisie non scopée ou sur contrôle sans handle propre.
+  - Résolution automatique du contrôle enfant ayant le focus clavier via `GetGUIThreadInfo().hwndFocus` lorsqu'aucun `element_index` n'est spécifié. En l'absence de champ focalisé, l'action échoue proprement avec `ComputerError` au lieu d'envoyer des frappes dans le vide.
+  - Remplacement de `SendMessageW` par `SendMessageTimeoutW` avec drapeaux `SMTO_ABORTIFHUNG | SMTO_NORMAL` et délai de garde de 1 000 ms, prévenant tout blocage du serveur MCP en cas d'application cible non réactive.
+  - Élimination de la désallocation mémoire prématurée du tampon ctypes : allocation persistante avec `ctypes.create_unicode_buffer("")` garantissant zéro corruption mémoire ou caractères parasites.
+- **Prise en Charge des Chemins Entre Guillemets & Diffing Pré/Post Lancement dans `launch_app`** :
+  - Transmission directe de la commande à `subprocess.Popen(command, shell=False)` sous Windows (`CreateProcessW` gérant nativement les chemins entre guillemets tels que `"C:\Program Files\..."` et leurs arguments sans dépendre de `shlex.split`).
+  - Détection de fenêtre par comparaison différentielle des HWND avant et après création (`before_hwnds`), assurant la découverte immédiate de la fenêtre principale même pour les applications multi-processus, déléguées ou à instance unique.
+  - Suppression de la condition erronée sur le caractère `&` (qui forçait indûment `shell=True` pour toute URL avec paramètres de requête).
+- **Vérification Stricte et Déterministe de la Valeur Saisie dans `type_text`** :
+  - Comparaison systématique de la valeur relue (`GetValuePattern().Value`) avec le texte attendu. En cas d'incohérence, d'échec d'injection ou de champ en lecture seule, levée immédiate d'une `ComputerError` explicite au lieu d'un faux succès.
+  - Repli propre sur `val_pat.SetValue("")` pour `clear_first` sur les contrôles UIA sans HWND Win32 natif (Chromium, WPF, WinUI).
+
+### Tests
+- Suite étendue à 100 tests unitaires 100 % passants (98 auparavant), couvrant la protection du titre racine sous `WM_SETTEXT`, le timeout `SendMessageTimeoutW`, la validation stricte de relecture textuelle et le rejet de saisie non focalisée.
+
 ## [2.4.1] - 2026-10-11
 
 ### Corrigé

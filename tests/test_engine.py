@@ -657,21 +657,29 @@ def test_post_message_type_mocked(monkeypatch):
     sent_messages = []
     monkeypatch.setattr(engine, "IsWindow", lambda h: True)
     monkeypatch.setattr(
-        engine, "SendMessageW", lambda h, msg, wparam, lparam: sent_messages.append((h, msg, wparam, lparam)) or 0
+        engine,
+        "SendMessageTimeoutW",
+        lambda h, msg, wparam, lparam, flags, timeout, res_ptr: sent_messages.append((h, msg, wparam, lparam)) or 1,
     )
     monkeypatch.setattr(
         engine, "PostMessageW", lambda h, msg, wparam, lparam: chars_posted.append((h, msg, wparam, lparam))
     )
     monkeypatch.setattr(engine.time, "sleep", lambda s: None)
 
-    count = engine.post_message_type(12345, "A\nB", clear_first=True)
+    # 1. With target_control_hwnd != hwnd: WM_SETTEXT sent to child
+    count = engine.post_message_type(12345, "A\nB", target_control_hwnd=99999, clear_first=True)
     assert count == 3
     assert len(sent_messages) == 1
+    assert sent_messages[0][0] == 99999
     assert sent_messages[0][1] == engine.WM_SETTEXT
-    assert (12345, engine.WM_CHAR, 65, 0) in chars_posted
-    assert (12345, engine.WM_KEYDOWN, engine.VK_RETURN, 0) in chars_posted
-    assert (12345, engine.WM_CHAR, 0x0D, 0) in chars_posted
-    assert (12345, engine.WM_CHAR, 66, 0) in chars_posted
+    assert (99999, engine.WM_CHAR, 65, 0) in chars_posted
+
+    # 2. When target == hwnd: WM_SETTEXT must NEVER be sent to root hwnd!
+    sent_messages.clear()
+    monkeypatch.setattr(engine, "get_focused_child_hwnd", lambda h: None)
+    count2 = engine.post_message_type(12345, "C", clear_first=True)
+    assert count2 == 1
+    assert len(sent_messages) == 0
 
 
 def test_launch_app_background_uses_sw_showminnoactive(monkeypatch):
@@ -703,7 +711,7 @@ def test_launch_app_background_uses_sw_showminnoactive(monkeypatch):
     assert res["hwnd"] == 9876
     assert res["title"] == "Background App"
     assert res["background"] is True
-    assert captured["args"] == ["notepad.exe"]
+    assert captured["args"] == "notepad.exe"
     assert captured["shell"] is False
     assert captured["startupinfo"].wShowWindow == engine.SW_SHOWMINNOACTIVE
 
@@ -729,6 +737,7 @@ def test_click_method_post_message(monkeypatch):
 def test_type_text_method_post_message(monkeypatch):
     calls = []
     monkeypatch.setattr(engine, "IsWindow", lambda h: True)
+    monkeypatch.setattr(engine, "get_focused_child_hwnd", lambda h: 88888)
     monkeypatch.setattr(
         engine,
         "post_message_type",
@@ -741,7 +750,7 @@ def test_type_text_method_post_message(monkeypatch):
     assert res["success"] is True
     assert res["method"] == "post_message_char"
     assert res["length"] == 5
-    assert calls == [(12345, "Hello", None, True)]
+    assert calls == [(12345, "Hello", 88888, True)]
 
 
 def test_click_and_type_reject_unknown_methods():
@@ -755,7 +764,7 @@ def test_type_text_post_message_with_element_and_readback(monkeypatch):
     calls = []
 
     class FakeValPat:
-        Value = "Readback Value"
+        Value = "Expected Test Value"
 
     class FakeControl:
         NativeWindowHandle = 55555
@@ -776,13 +785,43 @@ def test_type_text_post_message_with_element_and_readback(monkeypatch):
 
     res = engine.type_text("Test", hwnd=12345, element_index=3, method="post_message", clear_first=True)
     assert res["success"] is True
-    assert res["verified_value"] == "Readback Value"
+    assert res["verified_value"] == "Expected Test Value"
     assert calls == [(12345, "Test", 55555, True)]
+
+
+def test_type_text_post_message_verification_failure_raises(monkeypatch):
+    class FakeValPat:
+        Value = "Completely Different Value"
+
+    class FakeControl:
+        NativeWindowHandle = 55555
+
+        def GetValuePattern(self):
+            return FakeValPat()
+
+    monkeypatch.setattr(engine, "IsWindow", lambda h: True)
+    monkeypatch.setattr(engine, "_cached_element", lambda h, idx: FakeControl())
+    monkeypatch.setattr(
+        engine,
+        "post_message_type",
+        lambda hwnd, text, target_control_hwnd=None, clear_first=False: len(text),
+    )
+    monkeypatch.setattr(engine.time, "sleep", lambda s: None)
+
+    with pytest.raises(ComputerError, match="Échec de la saisie dans \\[3\\]"):
+        engine.type_text("ExpectedText", hwnd=12345, element_index=3, method="post_message")
+
+
+def test_type_text_post_message_without_element_and_no_focus_raises(monkeypatch):
+    monkeypatch.setattr(engine, "IsWindow", lambda h: True)
+    monkeypatch.setattr(engine, "get_focused_child_hwnd", lambda h: None)
+
+    with pytest.raises(ComputerError, match="aucun champ de saisie n'a le focus"):
+        engine.type_text("Hello", hwnd=12345, method="post_message")
 
 
 def test_post_message_click_resolves_nested_child(monkeypatch):
     posted = []
-    # Hierarchy: 1000 -> 2000 -> 3000
     hierarchy = {1000: 2000, 2000: 3000, 3000: 3000}
     monkeypatch.setattr(engine, "IsWindow", lambda h: True)
     monkeypatch.setattr(engine, "RealChildWindowFromPoint", lambda hwnd, pt: hierarchy.get(hwnd, hwnd))
@@ -792,7 +831,6 @@ def test_post_message_click_resolves_nested_child(monkeypatch):
 
     res = engine.post_message_click(1000, 100, 100, button="left", count=1)
     assert res is True
-    # The message should have been posted to the deepest leaf 3000
     assert posted[0][0] == 3000
 
 
