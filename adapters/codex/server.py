@@ -224,13 +224,21 @@ def computer_click(
             if effect:
                 return _background(target, f"{label}: {effect}.", guard, screenshot_after, settle_ms)
         if method == "uia":
-            raise ComputerError(f"{label} does not support UI Automation click. Try post_message or mouse with foreground=True.")
+            raise ComputerError(
+                f"{label} does not support UI Automation click. Try post_message or mouse with foreground=True."
+            )
         if method == "post_message":
             center = engine.element_center(control, engine.current_frame(target))
             if center is None:
                 raise ComputerError(f"{label} is not currently visible in window.")
-            engine.post_message_click(target, *center, button=button, count=click_count)
-            return _done(target, f"PostMessage click {button} x{click_count} on {label} (silent, no focus steal).", screenshot_after, settle_ms)
+            ctrl_hwnd = getattr(control, "NativeWindowHandle", 0) or None
+            engine.post_message_click(target, *center, button=button, count=click_count, target_control_hwnd=ctrl_hwnd)
+            return _done(
+                target,
+                f"PostMessage click {button} x{click_count} on {label} (silent, no focus steal).",
+                screenshot_after,
+                settle_ms,
+            )
 
         _require_foreground(foreground, f"Click on {label}")
         with engine.input_target(target):
@@ -249,7 +257,12 @@ def computer_click(
 
     if method == "post_message":
         engine.post_message_click(target, *point, button=button, count=click_count)
-        return _done(target, f"PostMessage click {button} x{click_count} at ({x},{y}) (silent, no focus steal).", screenshot_after, settle_ms)
+        return _done(
+            target,
+            f"PostMessage click {button} x{click_count} at ({x},{y}) (silent, no focus steal).",
+            screenshot_after,
+            settle_ms,
+        )
 
     if method == "uia":
         raise ComputerError("Coordinate click (x, y) does not support UIA method. Use auto, post_message, or mouse.")
@@ -327,10 +340,28 @@ def computer_type_text(
             raise ComputerError(f"[{element_index}] does not accept UI Automation typing.")
 
     if method == "post_message":
-        chars = engine.post_message_type(target, text)
-        return _done(target, f"Typed {chars} characters via PostMessage WM_CHAR into {engine.describe(target)} without focus steal.", screenshot_after, settle_ms)
+        ctrl_hwnd = getattr(control, "NativeWindowHandle", 0) if element_index is not None else None
+        chars = engine.post_message_type(target, text, target_control_hwnd=ctrl_hwnd, clear_first=clear_first)
+        val_info = ""
+        if element_index is not None:
+            try:
+                time.sleep(0.05)
+                val_pat = control.GetValuePattern()
+                if val_pat and val_pat.Value is not None:
+                    val_info = f" (verified value: {val_pat.Value!r})"
+            except Exception:
+                pass
+        return _done(
+            target,
+            f"Typed {chars} characters via PostMessage WM_CHAR into {engine.describe(target)} without focus steal{val_info}.",
+            screenshot_after,
+            settle_ms,
+        )
 
-    _require_foreground(foreground, f"Keyboard input{' into [' + str(element_index) + ']' if element_index is not None else ' without element_index'}")
+    _require_foreground(
+        foreground,
+        f"Keyboard input{' into [' + str(element_index) + ']' if element_index is not None else ' without element_index'}",
+    )
     with engine.input_target(target):
         if element_index is not None and not engine.focus_element(control):
             raise ComputerError(f"[{element_index}] could not receive keyboard focus. Re-inspect window state.")

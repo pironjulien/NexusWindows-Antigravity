@@ -13,6 +13,7 @@ import ctypes
 import io
 import math
 import os
+import shlex
 import subprocess
 import sys
 import threading
@@ -134,6 +135,7 @@ def ensure_default_desktop() -> bool:
         pass
     return False
 
+
 GetWindowRect = _proto(user32, "GetWindowRect", wintypes.BOOL, HWND, ctypes.POINTER(RECT))
 GetWindowLongPtrW = _proto(user32, "GetWindowLongPtrW", ctypes.c_ssize_t, HWND, ctypes.c_int)
 WindowFromPoint = _proto(user32, "WindowFromPoint", HWND, POINT)
@@ -143,9 +145,18 @@ SendInput = _proto(user32, "SendInput", wintypes.UINT, wintypes.UINT, ctypes.POI
 VkKeyScanW = _proto(user32, "VkKeyScanW", wintypes.SHORT, wintypes.WCHAR)
 MapVirtualKeyW = _proto(user32, "MapVirtualKeyW", wintypes.UINT, wintypes.UINT, wintypes.UINT)
 GetSystemMetrics = _proto(user32, "GetSystemMetrics", ctypes.c_int, ctypes.c_int)
-GetWindow =_proto(user32, "GetWindow", HWND, HWND, wintypes.UINT)
+GetWindow = _proto(user32, "GetWindow", HWND, HWND, wintypes.UINT)
 SetWindowPos = _proto(
-    user32, "SetWindowPos", wintypes.BOOL, HWND, HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT
+    user32,
+    "SetWindowPos",
+    wintypes.BOOL,
+    HWND,
+    HWND,
+    ctypes.c_int,
+    ctypes.c_int,
+    ctypes.c_int,
+    ctypes.c_int,
+    wintypes.UINT,
 )
 GetLastInputInfo = _proto(user32, "GetLastInputInfo", wintypes.BOOL, ctypes.POINTER(LASTINPUTINFO))
 SetWinEventHook = _proto(
@@ -156,15 +167,26 @@ MsgWaitForMultipleObjects = _proto(
     user32, "MsgWaitForMultipleObjects", DWORD, DWORD, ctypes.c_void_p, wintypes.BOOL, DWORD, DWORD
 )
 PeekMessageW = _proto(
-    user32, "PeekMessageW", wintypes.BOOL, ctypes.POINTER(wintypes.MSG), HWND, wintypes.UINT, wintypes.UINT, wintypes.UINT
+    user32,
+    "PeekMessageW",
+    wintypes.BOOL,
+    ctypes.POINTER(wintypes.MSG),
+    HWND,
+    wintypes.UINT,
+    wintypes.UINT,
+    wintypes.UINT,
 )
 TranslateMessage = _proto(user32, "TranslateMessage", wintypes.BOOL, ctypes.POINTER(wintypes.MSG))
 DispatchMessageW = _proto(user32, "DispatchMessageW", ctypes.c_ssize_t, ctypes.POINTER(wintypes.MSG))
-PostThreadMessageW = _proto(user32, "PostThreadMessageW", wintypes.BOOL, DWORD, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+PostThreadMessageW = _proto(
+    user32, "PostThreadMessageW", wintypes.BOOL, DWORD, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM
+)
 PostMessageW = _proto(user32, "PostMessageW", wintypes.BOOL, HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
 SendMessageW = _proto(user32, "SendMessageW", ctypes.c_ssize_t, HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
 ScreenToClient = _proto(user32, "ScreenToClient", wintypes.BOOL, HWND, ctypes.POINTER(POINT))
+RealChildWindowFromPoint = _proto(user32, "RealChildWindowFromPoint", HWND, HWND, POINT)
 
+WM_SETTEXT = 0x000C
 WM_MOUSEMOVE = 0x0200
 WM_LBUTTONDOWN = 0x0201
 WM_LBUTTONUP = 0x0202
@@ -219,6 +241,7 @@ def input_lock(timeout_ms: int = 5000):
             ReleaseMutex(h_mutex)
         CloseHandle(h_mutex)
 
+
 QueryFullProcessImageNameW = _proto(
     kernel32, "QueryFullProcessImageNameW", wintypes.BOOL, HANDLE, DWORD, wintypes.LPWSTR, ctypes.POINTER(DWORD)
 )
@@ -233,7 +256,9 @@ GetDC = _proto(user32, "GetDC", wintypes.HDC, HWND)
 ReleaseDC = _proto(user32, "ReleaseDC", ctypes.c_int, HWND, wintypes.HDC)
 PrintWindow = _proto(user32, "PrintWindow", wintypes.BOOL, HWND, wintypes.HDC, wintypes.UINT)
 CreateCompatibleDC = _proto(gdi32, "CreateCompatibleDC", wintypes.HDC, wintypes.HDC)
-CreateCompatibleBitmap = _proto(gdi32, "CreateCompatibleBitmap", wintypes.HBITMAP, wintypes.HDC, ctypes.c_int, ctypes.c_int)
+CreateCompatibleBitmap = _proto(
+    gdi32, "CreateCompatibleBitmap", wintypes.HBITMAP, wintypes.HDC, ctypes.c_int, ctypes.c_int
+)
 SelectObject = _proto(gdi32, "SelectObject", wintypes.HGDIOBJ, wintypes.HDC, wintypes.HGDIOBJ)
 DeleteObject = _proto(gdi32, "DeleteObject", wintypes.BOOL, wintypes.HGDIOBJ)
 DeleteDC = _proto(gdi32, "DeleteDC", wintypes.BOOL, wintypes.HDC)
@@ -641,9 +666,7 @@ SESSION = _Session()
 def resolve_target(hwnd: int | None) -> int:
     if hwnd is None:
         if SESSION.target is None:
-            raise ComputerError(
-                "Aucune cible : appelez computer_list_windows puis passez hwnd (0 = écran entier)."
-            )
+            raise ComputerError("Aucune cible : appelez computer_list_windows puis passez hwnd (0 = écran entier).")
         hwnd = SESSION.target
     if hwnd != SCREEN and not IsWindow(hwnd):
         raise ComputerError(f"La fenêtre {hwnd} n'existe plus : appelez computer_list_windows.")
@@ -697,7 +720,9 @@ def covering_windows(frame: Frame) -> list[int]:
     return list(covering)
 
 
-def _badge_spot(box: tuple[int, int, int, int], size: tuple[float, float], taken: list, bounds: tuple[int, int]) -> tuple[float, float]:
+def _badge_spot(
+    box: tuple[int, int, int, int], size: tuple[float, float], taken: list, bounds: tuple[int, int]
+) -> tuple[float, float]:
     """First badge position that overlaps no other badge: inside top-left, then left of, above, below the element."""
     x1, y1, x2, y2 = box
     width, height = size
@@ -752,7 +777,9 @@ def _draw_marks(image: Image.Image, marks: list[tuple[int, tuple[int, int, int, 
         label, size = str(index), sizes[index]
         draw.rectangle((left, top, left + size[0], top + size[1]), fill=(*MARK_RGB, BADGE_ALPHA))
         # A dark outline keeps the white number legible on any background now that the badge lets it through.
-        draw.text((left + 3, top), label, fill=(255, 255, 255, 255), font=font, stroke_width=1, stroke_fill=(80, 0, 25, 255))
+        draw.text(
+            (left + 3, top), label, fill=(255, 255, 255, 255), font=font, stroke_width=1, stroke_fill=(80, 0, 25, 255)
+        )
     image.paste(Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB"))
 
 
@@ -786,7 +813,9 @@ def background_grab(hwnd: int, frame: Frame) -> Image.Image | None:
     return image
 
 
-def screenshot(hwnd: int, marks: list[tuple[int, tuple[int, int, int, int]]] | None = None) -> tuple[Frame, bytes, list[str]]:
+def screenshot(
+    hwnd: int, marks: list[tuple[int, tuple[int, int, int, int]]] | None = None
+) -> tuple[Frame, bytes, list[str]]:
     """Captures without bringing anything to the front: covered windows are rendered by themselves."""
     frame = current_frame(hwnd)
     notes = []
@@ -798,7 +827,8 @@ def screenshot(hwnd: int, marks: list[tuple[int, tuple[int, int, int, int]]] | N
             if covering:
                 notes.append(
                     "Cette application ne se dessine pas en arrière-plan : la capture montre "
-                    + ", ".join(describe(h) for h in covering[:3]) + " par-dessus."
+                    + ", ".join(describe(h) for h in covering[:3])
+                    + " par-dessus."
                 )
         else:
             notes.append("Capturée en arrière-plan, sans la mettre devant.")
@@ -920,7 +950,7 @@ def _quoted(text: str, limit: int = 80) -> str:
 
 def _element_line(index: int, control: Any, control_type: str, box: tuple[int, int, int, int]) -> str:
     x1, y1, x2, y2 = box
-    line = f'[{index}] {control_type.removesuffix("Control")} {_quoted(control.Name)} ({(x1 + x2) // 2},{(y1 + y2) // 2}) {x2 - x1}×{y2 - y1}'
+    line = f"[{index}] {control_type.removesuffix('Control')} {_quoted(control.Name)} ({(x1 + x2) // 2},{(y1 + y2) // 2}) {x2 - x1}×{y2 - y1}"
     if control_type in _VALUE_TYPES:
         try:
             pattern = control.GetPattern(uia.PatternId.ValuePattern)
@@ -938,9 +968,7 @@ def _element_line(index: int, control: Any, control_type: str, box: tuple[int, i
 
 def element(hwnd: int, index: int) -> Any:
     if SESSION.elements_hwnd != hwnd or index not in SESSION.elements:
-        raise ComputerError(
-            f"Élément [{index}] inconnu pour {describe(hwnd)} : relancez computer_get_window_state."
-        )
+        raise ComputerError(f"Élément [{index}] inconnu pour {describe(hwnd)} : relancez computer_get_window_state.")
     return SESSION.elements[index]
 
 
@@ -1168,7 +1196,9 @@ def _try_foreground(hwnd: int, with_alt: bool) -> None:
         current = foreground()
         own_thread = GetCurrentThreadId()
         other_thread = GetWindowThreadProcessId(current, None) if current else 0
-        attached = bool(other_thread and other_thread != own_thread and AttachThreadInput(own_thread, other_thread, True))
+        attached = bool(
+            other_thread and other_thread != own_thread and AttachThreadInput(own_thread, other_thread, True)
+        )
         try:
             if with_alt:  # A held Alt key lifts the foreground lock for the next SetForegroundWindow.
                 _send(_key_input(VK_MENU, up=False))
@@ -1388,11 +1418,15 @@ class ForegroundGuard:
     def summary(self) -> str:
         parts = []
         if self.failed:
-            parts.append(f"l'application a pris le premier plan et Windows a refusé de le rendre à {describe(self.front)}")
+            parts.append(
+                f"l'application a pris le premier plan et Windows a refusé de le rendre à {describe(self.front)}"
+            )
         elif self.taken and not self.yielded:
             parts.append(f"l'application a pris le premier plan : rendu en {self.longest_ms:.0f} ms")
         if self.yielded:
-            parts.append("une autre fenêtre est passée au premier plan pendant l'action, sans doute Julien : laissée devant")
+            parts.append(
+                "une autre fenêtre est passée au premier plan pendant l'action, sans doute Julien : laissée devant"
+            )
         if self.z_restored is True:
             parts.append("fenêtre remise à sa place dans l'empilement")
         elif self.z_restored is False:
@@ -1514,6 +1548,7 @@ def post_message_click(
     screen_y: int,
     button: str = "left",
     count: int = 1,
+    target_control_hwnd: int | None = None,
 ) -> bool:
     """Sends mouse click messages directly to the window message queue without moving cursor or stealing focus."""
     if not IsWindow(hwnd):
@@ -1521,9 +1556,19 @@ def post_message_click(
     if button not in _BUTTONS:
         raise ComputerError(f"Bouton inconnu : {button!r} (left, right, middle).")
 
-    pt_screen = POINT(screen_x, screen_y)
-    child = WindowFromPoint(pt_screen)
-    target = child if child and IsWindow(child) and (child == hwnd or GetAncestor(child, GA_ROOT) == hwnd) else hwnd
+    if target_control_hwnd and IsWindow(target_control_hwnd):
+        target = target_control_hwnd
+    else:
+        # Resolve child control within hwnd hierarchy without relying on WindowFromPoint
+        curr = hwnd
+        for _ in range(10):
+            pt = POINT(screen_x, screen_y)
+            ScreenToClient(curr, ctypes.byref(pt))
+            nxt = RealChildWindowFromPoint(curr, pt)
+            if not nxt or nxt == curr or not IsWindow(nxt):
+                break
+            curr = nxt
+        target = curr
 
     pt_client = POINT(screen_x, screen_y)
     ScreenToClient(target, ctypes.byref(pt_client))
@@ -1553,11 +1598,15 @@ def post_message_type(
     hwnd: int,
     text: str,
     target_control_hwnd: int | None = None,
+    clear_first: bool = False,
 ) -> int:
     """Sends Unicode characters directly to the window message queue via WM_CHAR without focus steal."""
     target = target_control_hwnd or hwnd
     if not IsWindow(target):
         raise ComputerError(f"Fenêtre invalide (hwnd {target}).")
+    if clear_first:
+        ptr_empty = ctypes.cast(ctypes.c_wchar_p(""), ctypes.c_void_p).value or 0
+        SendMessageW(target, WM_SETTEXT, 0, ptr_empty)
     chars_sent = 0
     for char in text:
         if char == "\r":
@@ -1595,26 +1644,48 @@ def launch_app(
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startupinfo.wShowWindow = SW_SHOWMINNOACTIVE
 
-    proc = subprocess.Popen(
-        command,
-        startupinfo=startupinfo,
-        shell=True,
-    )
-
-    if wait_ms > 0:
-        time.sleep(wait_ms / 1000.0)
+    use_shell = any(op in command for op in ("|", ">", "<", "&"))
+    try:
+        if not use_shell:
+            args = shlex.split(command, posix=False)
+            proc = subprocess.Popen(args, startupinfo=startupinfo, shell=False)
+        else:
+            proc = subprocess.Popen(command, startupinfo=startupinfo, shell=True)
+    except FileNotFoundError:
+        proc = subprocess.Popen(command, startupinfo=startupinfo, shell=True)
 
     detected_hwnd = None
     detected_title = ""
-    try:
-        windows = list_windows(visible_only=False)
-        for win in windows:
-            if win["pid"] == proc.pid:
-                detected_hwnd = win["hwnd"]
-                detected_title = win["title"]
-                break
-    except Exception:
-        pass
+
+    # Poll up to wait_ms for the window to be created
+    poll_time = max(0.1, wait_ms / 1000.0) if wait_ms > 0 else 0.1
+    deadline = time.time() + poll_time
+    while time.time() < deadline:
+        try:
+            candidates = []
+            for win in list_windows(visible_only=False):
+                if win["pid"] == proc.pid:
+                    candidates.append(win)
+            if candidates:
+                main_win = None
+                for w in candidates:
+                    t = w.get("title", "")
+                    if (
+                        t
+                        and t not in ("Tooltip", "Default IME", "MSCTFIME UI", "CiceroUIWndFrame")
+                        and not t.startswith("TF_")
+                    ):
+                        main_win = w
+                        break
+                if not main_win:
+                    main_win = candidates[0]
+                detected_hwnd = main_win["hwnd"]
+                detected_title = main_win.get("title", "")
+                if detected_title:
+                    break
+        except Exception:
+            pass
+        time.sleep(0.05)
 
     return {
         "success": True,
@@ -2092,9 +2163,7 @@ def get_window_state(
 
     if capture_screenshot or output_path:
         annotate_list = elements if annotate_screenshot else None
-        webp_bytes, meta = capture_window_image(
-            target_hwnd, return_meta=True, elements_to_annotate=annotate_list
-        )
+        webp_bytes, meta = capture_window_image(target_hwnd, return_meta=True, elements_to_annotate=annotate_list)
         result["image_dimensions"] = meta.get("captured_size")
         result["scale_factor"] = meta.get("scale_factor")
 
@@ -2185,7 +2254,10 @@ def click(
 
     if method == "post_message":
         click_x, click_y = _control_center(ctrl) if ctrl is not None else _window_point(target_hwnd, x, y)
-        post_message_click(target_hwnd, click_x, click_y, button=button, count=click_count)
+        ctrl_hwnd = getattr(ctrl, "NativeWindowHandle", 0) if ctrl is not None else None
+        post_message_click(
+            target_hwnd, click_x, click_y, button=button, count=click_count, target_control_hwnd=ctrl_hwnd
+        )
         return {
             "success": True,
             "method": "post_message",
@@ -2270,13 +2342,26 @@ def type_text(
             raise ComputerError(f"L'élément [{element_index}] ne supporte pas ValuePattern.")
 
     if method == "post_message":
-        chars = post_message_type(target_hwnd, text)
-        return {
+        ctrl_hwnd = getattr(ctrl, "NativeWindowHandle", 0) if ctrl is not None else None
+        chars = post_message_type(target_hwnd, text, target_control_hwnd=ctrl_hwnd, clear_first=clear_first)
+        verified_val = None
+        if ctrl is not None:
+            try:
+                time.sleep(0.05)
+                val_pat = ctrl.GetValuePattern()
+                if val_pat and val_pat.Value is not None:
+                    verified_val = val_pat.Value
+            except Exception:
+                pass
+        result_payload = {
             "success": True,
             "method": "post_message_char",
             "element_index": element_index,
             "length": chars,
         }
+        if verified_val is not None:
+            result_payload["verified_value"] = verified_val
+        return result_payload
 
     with input_target(target_hwnd, activate=foreground, action="La saisie clavier physique"):
         if ctrl is not None and not focus_element(ctrl):

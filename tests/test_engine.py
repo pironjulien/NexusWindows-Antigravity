@@ -133,7 +133,14 @@ def test_every_real_input_tool_exposes_foreground():
     import server
 
     tools = {t.name: t.inputSchema["properties"] for t in asyncio.run(server.mcp.list_tools())}
-    for name in ("computer_click", "computer_move_mouse", "computer_type_text", "computer_press_key", "computer_scroll", "computer_drag"):
+    for name in (
+        "computer_click",
+        "computer_move_mouse",
+        "computer_type_text",
+        "computer_press_key",
+        "computer_scroll",
+        "computer_drag",
+    ):
         assert tools[name]["foreground"]["default"] is False
 
 
@@ -175,7 +182,15 @@ class _Rect:
 
 
 class _FakeControl:
-    def __init__(self, name="", control_type="ButtonControl", box=(0, 0, 10, 10), control_element=True, children=(), patterns=None):
+    def __init__(
+        self,
+        name="",
+        control_type="ButtonControl",
+        box=(0, 0, 10, 10),
+        control_element=True,
+        children=(),
+        patterns=None,
+    ):
         self.Name, self.ControlTypeName, self.IsControlElement = name, control_type, control_element
         self.BoundingRectangle = _Rect(*box)
         self.IsOffscreen, self.IsEnabled, self.HasKeyboardFocus, self.IsKeyboardFocusable = False, True, False, True
@@ -315,7 +330,9 @@ class _FakeScroll:
 
     def Scroll(self, horizontal, vertical, waitTime):
         self.calls.append((horizontal, vertical, waitTime))
-        self.VerticalScrollPercent = max(0.0, min(100.0, self.VerticalScrollPercent + (self.step if vertical == 4 else -self.step)))
+        self.VerticalScrollPercent = max(
+            0.0, min(100.0, self.VerticalScrollPercent + (self.step if vertical == 4 else -self.step))
+        )
 
 
 def test_background_scroll_climbs_to_the_container_and_reads_the_position_back():
@@ -331,9 +348,13 @@ def test_impossible_scroll_positions_are_not_reported():
         def Scroll(self, horizontal, vertical, waitTime):
             self.VerticalScrollPercent += 40.0
 
-    page = _FakeControl("Page", "DocumentControl", patterns={engine.uia.PatternId.ScrollPattern: Reversed(percent=277.0)})
+    page = _FakeControl(
+        "Page", "DocumentControl", patterns={engine.uia.PatternId.ScrollPattern: Reversed(percent=277.0)}
+    )
     assert engine.background_scroll(page, "up", 1) == "position illisible : vérifier par une capture"
-    page = _FakeControl("Page", "DocumentControl", patterns={engine.uia.PatternId.ScrollPattern: _FakeScroll(percent=277.0)})
+    page = _FakeControl(
+        "Page", "DocumentControl", patterns={engine.uia.PatternId.ScrollPattern: _FakeScroll(percent=277.0)}
+    )
     assert engine.background_scroll(page, "up", 1) == "position 100 %"
 
 
@@ -467,7 +488,6 @@ def test_scroll_physical_mocked(monkeypatch):
     assert {(c[0], c[1]) for c in calls} == {(400, 300)}  # The window's center, not wherever the cursor was.
 
 
-
 @pytest.fixture
 def fake_desktop(monkeypatch):
     """A desktop where window 12345 is in front; every input is recorded instead of sent."""
@@ -533,7 +553,9 @@ def test_input_target_holds_the_lock_from_activation_to_the_last_input(monkeypat
 
 
 def test_input_target_never_activates_without_permission(monkeypatch, fake_desktop):
-    monkeypatch.setattr(engine, "ensure_input_target", lambda h: pytest.fail("foreground taken without foreground=True"))
+    monkeypatch.setattr(
+        engine, "ensure_input_target", lambda h: pytest.fail("foreground taken without foreground=True")
+    )
     fake_desktop["foreground"] = 99999
     with pytest.raises(ComputerError, match="passez foreground=True"):
         with engine.input_target(12345, activate=False):
@@ -610,7 +632,7 @@ def test_drag_tuple_signature_checks_its_window(monkeypatch, fake_desktop):
 def test_post_message_click_mocked(monkeypatch):
     posted = []
     monkeypatch.setattr(engine, "IsWindow", lambda h: True)
-    monkeypatch.setattr(engine, "WindowFromPoint", lambda pt: 12345)
+    monkeypatch.setattr(engine, "RealChildWindowFromPoint", lambda hwnd, pt: hwnd)
     monkeypatch.setattr(engine, "ScreenToClient", lambda hwnd, pt_ptr: True)
     monkeypatch.setattr(engine, "PostMessageW", lambda h, msg, wparam, lparam: posted.append((h, msg, wparam, lparam)))
     monkeypatch.setattr(engine.time, "sleep", lambda s: None)
@@ -622,17 +644,30 @@ def test_post_message_click_mocked(monkeypatch):
     assert (12345, engine.WM_LBUTTONDOWN, engine.MK_LBUTTON, expected_lparam) in posted
     assert (12345, engine.WM_LBUTTONUP, 0, expected_lparam) in posted
 
+    # Test with target_control_hwnd
+    posted.clear()
+    res2 = engine.post_message_click(12345, 150, 80, button="left", count=1, target_control_hwnd=99999)
+    assert res2 is True
+    assert (99999, engine.WM_MOUSEMOVE, 0, expected_lparam) in posted
+    assert (99999, engine.WM_LBUTTONDOWN, engine.MK_LBUTTON, expected_lparam) in posted
+
 
 def test_post_message_type_mocked(monkeypatch):
     chars_posted = []
+    sent_messages = []
     monkeypatch.setattr(engine, "IsWindow", lambda h: True)
+    monkeypatch.setattr(
+        engine, "SendMessageW", lambda h, msg, wparam, lparam: sent_messages.append((h, msg, wparam, lparam)) or 0
+    )
     monkeypatch.setattr(
         engine, "PostMessageW", lambda h, msg, wparam, lparam: chars_posted.append((h, msg, wparam, lparam))
     )
     monkeypatch.setattr(engine.time, "sleep", lambda s: None)
 
-    count = engine.post_message_type(12345, "A\nB")
+    count = engine.post_message_type(12345, "A\nB", clear_first=True)
     assert count == 3
+    assert len(sent_messages) == 1
+    assert sent_messages[0][1] == engine.WM_SETTEXT
     assert (12345, engine.WM_CHAR, 65, 0) in chars_posted
     assert (12345, engine.WM_KEYDOWN, engine.VK_RETURN, 0) in chars_posted
     assert (12345, engine.WM_CHAR, 0x0D, 0) in chars_posted
@@ -645,14 +680,20 @@ def test_launch_app_background_uses_sw_showminnoactive(monkeypatch):
     class FakeProc:
         pid = 4242
 
-    def mock_popen(cmd, startupinfo=None, shell=False):
-        captured["cmd"] = cmd
+    def mock_popen(args, startupinfo=None, shell=False):
+        captured["args"] = args
         captured["startupinfo"] = startupinfo
+        captured["shell"] = shell
         return FakeProc()
 
     monkeypatch.setattr(engine.subprocess, "Popen", mock_popen)
     monkeypatch.setattr(
-        engine, "list_windows", lambda visible_only: [{"pid": 4242, "hwnd": 9876, "title": "Background App"}]
+        engine,
+        "list_windows",
+        lambda visible_only: [
+            {"pid": 4242, "hwnd": 1111, "title": "Tooltip"},
+            {"pid": 4242, "hwnd": 9876, "title": "Background App"},
+        ],
     )
     monkeypatch.setattr(engine.time, "sleep", lambda s: None)
 
@@ -662,6 +703,8 @@ def test_launch_app_background_uses_sw_showminnoactive(monkeypatch):
     assert res["hwnd"] == 9876
     assert res["title"] == "Background App"
     assert res["background"] is True
+    assert captured["args"] == ["notepad.exe"]
+    assert captured["shell"] is False
     assert captured["startupinfo"].wShowWindow == engine.SW_SHOWMINNOACTIVE
 
 
@@ -670,25 +713,35 @@ def test_click_method_post_message(monkeypatch):
     monkeypatch.setattr(engine, "IsWindow", lambda h: True)
     monkeypatch.setattr(engine, "get_window_rect", lambda h: {"left": 0, "top": 0, "width": 800, "height": 600})
     monkeypatch.setattr(
-        engine, "post_message_click", lambda hwnd, x, y, button, count: calls.append((hwnd, x, y, button, count))
+        engine,
+        "post_message_click",
+        lambda hwnd, x, y, button="left", count=1, target_control_hwnd=None: calls.append(
+            (hwnd, x, y, button, count, target_control_hwnd)
+        ),
     )
 
     res = engine.click(hwnd=12345, x=50, y=60, method="post_message")
     assert res["success"] is True
     assert res["method"] == "post_message"
-    assert calls == [(12345, 50, 60, "left", 1)]
+    assert calls == [(12345, 50, 60, "left", 1, None)]
 
 
 def test_type_text_method_post_message(monkeypatch):
     calls = []
     monkeypatch.setattr(engine, "IsWindow", lambda h: True)
-    monkeypatch.setattr(engine, "post_message_type", lambda hwnd, text: calls.append((hwnd, text)) or len(text))
+    monkeypatch.setattr(
+        engine,
+        "post_message_type",
+        lambda hwnd, text, target_control_hwnd=None, clear_first=False: (
+            calls.append((hwnd, text, target_control_hwnd, clear_first)) or len(text)
+        ),
+    )
 
-    res = engine.type_text("Hello", hwnd=12345, method="post_message")
+    res = engine.type_text("Hello", hwnd=12345, method="post_message", clear_first=True)
     assert res["success"] is True
     assert res["method"] == "post_message_char"
     assert res["length"] == 5
-    assert calls == [(12345, "Hello")]
+    assert calls == [(12345, "Hello", None, True)]
 
 
 def test_click_and_type_reject_unknown_methods():
@@ -696,3 +749,73 @@ def test_click_and_type_reject_unknown_methods():
         engine.click(hwnd=12345, x=10, y=10, method="telepathy")
     with pytest.raises(ComputerError, match="method inconnue"):
         engine.type_text("test", hwnd=12345, method="quantum")
+
+
+def test_type_text_post_message_with_element_and_readback(monkeypatch):
+    calls = []
+
+    class FakeValPat:
+        Value = "Readback Value"
+
+    class FakeControl:
+        NativeWindowHandle = 55555
+
+        def GetValuePattern(self):
+            return FakeValPat()
+
+    monkeypatch.setattr(engine, "IsWindow", lambda h: True)
+    monkeypatch.setattr(engine, "_cached_element", lambda h, idx: FakeControl())
+    monkeypatch.setattr(
+        engine,
+        "post_message_type",
+        lambda hwnd, text, target_control_hwnd=None, clear_first=False: (
+            calls.append((hwnd, text, target_control_hwnd, clear_first)) or len(text)
+        ),
+    )
+    monkeypatch.setattr(engine.time, "sleep", lambda s: None)
+
+    res = engine.type_text("Test", hwnd=12345, element_index=3, method="post_message", clear_first=True)
+    assert res["success"] is True
+    assert res["verified_value"] == "Readback Value"
+    assert calls == [(12345, "Test", 55555, True)]
+
+
+def test_post_message_click_resolves_nested_child(monkeypatch):
+    posted = []
+    # Hierarchy: 1000 -> 2000 -> 3000
+    hierarchy = {1000: 2000, 2000: 3000, 3000: 3000}
+    monkeypatch.setattr(engine, "IsWindow", lambda h: True)
+    monkeypatch.setattr(engine, "RealChildWindowFromPoint", lambda hwnd, pt: hierarchy.get(hwnd, hwnd))
+    monkeypatch.setattr(engine, "ScreenToClient", lambda hwnd, pt_ptr: True)
+    monkeypatch.setattr(engine, "PostMessageW", lambda h, msg, wparam, lparam: posted.append((h, msg, wparam, lparam)))
+    monkeypatch.setattr(engine.time, "sleep", lambda s: None)
+
+    res = engine.post_message_click(1000, 100, 100, button="left", count=1)
+    assert res is True
+    # The message should have been posted to the deepest leaf 3000
+    assert posted[0][0] == 3000
+
+
+def test_launch_app_with_pipes_uses_shell(monkeypatch):
+    captured = {}
+
+    class FakeProc:
+        pid = 7777
+
+    def mock_popen(args, startupinfo=None, shell=False):
+        captured["args"] = args
+        captured["shell"] = shell
+        return FakeProc()
+
+    monkeypatch.setattr(engine.subprocess, "Popen", mock_popen)
+    monkeypatch.setattr(
+        engine,
+        "list_windows",
+        lambda visible_only: [{"pid": 7777, "hwnd": 9999, "title": "Piped Output"}],
+    )
+    monkeypatch.setattr(engine.time, "sleep", lambda s: None)
+
+    res = engine.launch_app("dir | findstr py", background=True, wait_ms=10)
+    assert res["success"] is True
+    assert res["pid"] == 7777
+    assert captured["shell"] is True

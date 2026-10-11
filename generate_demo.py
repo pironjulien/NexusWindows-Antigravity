@@ -133,13 +133,7 @@ def find_target_hwnd(proc_pid: int) -> int | None:
 def run():
     print("[1/5] Launching WinForms target application in background...")
     script_path = ASSETS_DIR / "demo_target.ps1"
-    cmd = [
-        "powershell.exe",
-        "-NoProfile",
-        "-ExecutionPolicy", "Bypass",
-        "-STA",
-        "-File", str(script_path.resolve())
-    ]
+    cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-STA", "-File", str(script_path.resolve())]
     proc = subprocess.Popen(cmd)
     time.sleep(3.5)
 
@@ -163,7 +157,7 @@ def run():
         w_img,
         cmd_text="Target app idle in background (User working in editor/browser)",
         result_text="Focus: 100% on Julien's active task | Cursor: Completely unmoved",
-        step_label="STEP 0/4"
+        step_label="STEP 0/4",
     )
     for _ in range(8):
         frames.append(f0)
@@ -181,7 +175,7 @@ def run():
         som_img,
         cmd_text="nexus-computer.get_window_state(hwnd, annotate_screenshot=True)",
         result_text=f"Discovered {len(state.get('elements', []))} UIA controls with Set-of-Marks badges [#1..#N]",
-        step_label="STEP 1/4: INSPECT"
+        step_label="STEP 1/4: INSPECT",
     )
     for _ in range(12):
         frames.append(f1)
@@ -195,21 +189,23 @@ def run():
         w_img,
         cmd_text="nexus-computer.click(element_index=1, foreground=False)",
         result_text=f"Toggled via {res.get('method')} • State={res.get('toggle_state')} • Focus stolen: 0ms",
-        step_label="STEP 2/4: TOGGLE"
+        step_label="STEP 2/4: TOGGLE",
     )
     for _ in range(10):
         frames.append(f2)
 
     # Step 3: Type Text via ValuePattern
     print("[4/5] Recording Step 3: Updating buffer via ValuePattern...")
-    res = computer_client.type_text("Symbiosis 100% Active • Zero Focus Theft", hwnd=hwnd, element_index=2, foreground=False)
+    res = computer_client.type_text(
+        "Symbiosis 100% Active • Zero Focus Theft", hwnd=hwnd, element_index=2, foreground=False
+    )
     time.sleep(0.3)
     w_img = grab_current_window()
     f3 = compose_frame(
         w_img,
         cmd_text="nexus-computer.type_text(text='...', element_index=2, foreground=False)",
         result_text=f"Written via {res.get('method')} • No keyboard hijack • Focus stolen: 0ms",
-        step_label="STEP 3/4: VALUE"
+        step_label="STEP 3/4: VALUE",
     )
     for _ in range(10):
         frames.append(f3)
@@ -223,7 +219,7 @@ def run():
         w_img,
         cmd_text="nexus-computer.click(element_index=3, foreground=False)",
         result_text=f"Invoked via {res.get('method')} • Action completed silently • Focus stolen: 0ms",
-        step_label="STEP 4/4: INVOKE"
+        step_label="STEP 4/4: INVOKE",
     )
     for _ in range(14):
         frames.append(f4)
@@ -233,7 +229,7 @@ def run():
         w_img,
         cmd_text="VERIFICATION COMPLETE: Done means Done",
         result_text="NexusAGY: 0ms focus theft | Claude & Codex: Steal foreground focus",
-        step_label="100% VERIFIED"
+        step_label="100% VERIFIED",
     )
     for _ in range(14):
         frames.append(f_end)
@@ -252,7 +248,7 @@ def run():
         loop=0,
         lossless=False,
         quality=82,
-        method=4
+        method=4,
     )
     print(f"[OK] Saved WebP: {webp_path} ({webp_path.stat().st_size / 1024:.1f} KB)")
 
@@ -267,13 +263,19 @@ def run():
         cmd_mp4 = [
             FFMPEG_PATH,
             "-y",
-            "-framerate", "8",
-            "-i", str(temp_frames_dir / "frame_%04d.png"),
-            "-c:v", "libx264",
-            "-pix_fmt", "yuv420p",
-            "-crf", "22",
-            "-preset", "slow",
-            str(mp4_path)
+            "-framerate",
+            "8",
+            "-i",
+            str(temp_frames_dir / "frame_%04d.png"),
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-crf",
+            "22",
+            "-preset",
+            "slow",
+            str(mp4_path),
         ]
         subprocess.run(cmd_mp4, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
         print(f"[OK] Saved MP4: {mp4_path} ({mp4_path.stat().st_size / 1024:.1f} KB)")
@@ -282,10 +284,13 @@ def run():
         cmd_gif = [
             FFMPEG_PATH,
             "-y",
-            "-framerate", "8",
-            "-i", str(temp_frames_dir / "frame_%04d.png"),
-            "-vf", "split[s0][s1];[s0]palettegen=max_colors=128:reserve_transparent=0[p];[s1][p]paletteuse=dither=bayer",
-            str(gif_path)
+            "-framerate",
+            "8",
+            "-i",
+            str(temp_frames_dir / "frame_%04d.png"),
+            "-vf",
+            "split[s0][s1];[s0]palettegen=max_colors=128:reserve_transparent=0[p];[s1][p]paletteuse=dither=bayer",
+            str(gif_path),
         ]
         subprocess.run(cmd_gif, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
         print(f"[OK] Saved GIF: {gif_path} ({gif_path.stat().st_size / 1024:.1f} KB)")

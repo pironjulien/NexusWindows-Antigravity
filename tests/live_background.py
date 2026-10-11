@@ -108,18 +108,36 @@ class Scenario:
         error, text, _ = await self.call(name, hwnd=self.hwnd, **arguments)
         away, still_front = self.sampler.away_ms(start, front), engine.foreground() == front
         events = self.log.wait(accept, 3) if accept else []
-        check(f"{label} : effet obtenu", not error and (accept is None or any(accept(e) for e in events)),
-              text.splitlines()[0][:110] if text else "")
-        kept = check(f"{label} : premier plan gardé (≤ {MAX_AWAY_MS} ms)", away <= MAX_AWAY_MS and still_front,
-                     f"{away:.0f} ms hors de {engine.describe(front)}")
+        check(
+            f"{label} : effet obtenu",
+            not error and (accept is None or any(accept(e) for e in events)),
+            text.splitlines()[0][:110] if text else "",
+        )
+        kept = check(
+            f"{label} : premier plan gardé (≤ {MAX_AWAY_MS} ms)",
+            away <= MAX_AWAY_MS and still_front,
+            f"{away:.0f} ms hors de {engine.describe(front)}",
+        )
         if not kept:
-            print("      " + " ".join(f"{1000 * (moment - start):+.0f}ms:{engine.describe(hwnd) if hwnd else 0}"
-                                      for moment, hwnd in self.sampler.changes if moment >= start))
-        check(f"{label} : place dans l'empilement gardée", z_rank(self.hwnd) == rank, f"rang {rank} → {z_rank(self.hwnd)}")
+            print(
+                "      "
+                + " ".join(
+                    f"{1000 * (moment - start):+.0f}ms:{engine.describe(hwnd) if hwnd else 0}"
+                    for moment, hwnd in self.sampler.changes
+                    if moment >= start
+                )
+            )
+        check(
+            f"{label} : place dans l'empilement gardée", z_rank(self.hwnd) == rank, f"rang {rank} → {z_rank(self.hwnd)}"
+        )
 
     async def run(self) -> None:
         error, state, images = await self.call("computer_get_window_state", hwnd=self.hwnd, screenshot=True)
-        check("capture annotée en arrière-plan", not error and len(images) == 1 and "arrière-plan" in state, state.splitlines()[-1][:90])
+        check(
+            "capture annotée en arrière-plan",
+            not error and len(images) == 1 and "arrière-plan" in state,
+            state.splitlines()[-1][:90],
+        )
         if images:
             check("numéros dessinés", find_color(decode(images[0]), engine.MARK_RGB) is not None)
         check("la capture n'a pas pris le premier plan", engine.foreground() != self.hwnd)
@@ -129,14 +147,30 @@ class Scenario:
             return
         index = {key: int(match.group(1)) for key, match in found.items()}
 
-        await self.background("case cochée", "computer_click", {"element_index": index["option"]},
-                              lambda e: e.get("event") == "checked" and e.get("value") is True)
-        await self.background("élément de liste sélectionné", "computer_click", {"element_index": index["row"]},
-                              lambda e: e.get("event") == "selected" and e.get("index") == 4)
-        await self.background("champ rempli", "computer_type_text", {"element_index": index["field"], "text": TEXT, "clear_first": True})
-        await self.background("bouton activé, texte reçu", "computer_click", {"element_index": index["valider"]},
-                              lambda e: e.get("event") == "button" and e.get("text") == TEXT)
-        await self.background("liste défilée", "computer_scroll", {"element_index": index["first"], "direction": "down", "amount": 3})
+        await self.background(
+            "case cochée",
+            "computer_click",
+            {"element_index": index["option"]},
+            lambda e: e.get("event") == "checked" and e.get("value") is True,
+        )
+        await self.background(
+            "élément de liste sélectionné",
+            "computer_click",
+            {"element_index": index["row"]},
+            lambda e: e.get("event") == "selected" and e.get("index") == 4,
+        )
+        await self.background(
+            "champ rempli", "computer_type_text", {"element_index": index["field"], "text": TEXT, "clear_first": True}
+        )
+        await self.background(
+            "bouton activé, texte reçu",
+            "computer_click",
+            {"element_index": index["valider"]},
+            lambda e: e.get("event") == "button" and e.get("text") == TEXT,
+        )
+        await self.background(
+            "liste défilée", "computer_scroll", {"element_index": index["first"], "direction": "down", "amount": 3}
+        )
 
         self.log.drain(0.05)
         error, text, _ = await self.call("computer_click", hwnd=self.hwnd, x=20, y=20)
@@ -168,7 +202,10 @@ async def run() -> None:
         app.kill()
 
     failed = [name for name, ok, _ in results if not ok]
-    print(f"\n{len(results) - len(failed)}/{len(results)} vérifications réussies" + (f" — échecs : {failed}" if failed else ""))
+    print(
+        f"\n{len(results) - len(failed)}/{len(results)} vérifications réussies"
+        + (f" — échecs : {failed}" if failed else "")
+    )
     sys.exit(1 if failed else 0)
 
 

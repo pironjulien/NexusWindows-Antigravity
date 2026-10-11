@@ -177,8 +177,14 @@ def computer_click(
             center = engine.element_center(control, engine.current_frame(target))
             if center is None:
                 raise ComputerError(f"{label} n'est pas visible dans la fenêtre : rien n'a été cliqué.")
-            engine.post_message_click(target, *center, button=button, count=click_count)
-            return _done(target, f"Clic PostMessage {button} ×{click_count} sur {label} (sans vol de focus).", screenshot_after, settle_ms)
+            ctrl_hwnd = getattr(control, "NativeWindowHandle", 0) or None
+            engine.post_message_click(target, *center, button=button, count=click_count, target_control_hwnd=ctrl_hwnd)
+            return _done(
+                target,
+                f"Clic PostMessage {button} ×{click_count} sur {label} (sans vol de focus).",
+                screenshot_after,
+                settle_ms,
+            )
 
         _require_foreground(foreground, f"Ce clic sur {label}")
         with engine.input_target(target):
@@ -197,7 +203,12 @@ def computer_click(
 
     if method == "post_message":
         engine.post_message_click(target, *point, button=button, count=click_count)
-        return _done(target, f"Clic PostMessage {button} ×{click_count} en ({x},{y}) (sans vol de focus).", screenshot_after, settle_ms)
+        return _done(
+            target,
+            f"Clic PostMessage {button} ×{click_count} en ({x},{y}) (sans vol de focus).",
+            screenshot_after,
+            settle_ms,
+        )
 
     if method == "uia":
         raise ComputerError("Le clic à des coordonnées (x, y) ne supporte pas la méthode UIA pure.")
@@ -264,10 +275,28 @@ def computer_type_text(
             raise ComputerError(f"[{element_index}] n'accepte pas l'écriture UI Automation : rien n'a été fait.")
 
     if method == "post_message":
-        chars = engine.post_message_type(target, text)
-        return _done(target, f"Saisie PostMessage WM_CHAR ({chars} caractères) envoyée à {engine.describe(target)} sans vol de focus.", screenshot_after, settle_ms)
+        ctrl_hwnd = getattr(control, "NativeWindowHandle", 0) if element_index is not None else None
+        chars = engine.post_message_type(target, text, target_control_hwnd=ctrl_hwnd, clear_first=clear_first)
+        val_info = ""
+        if element_index is not None:
+            try:
+                time.sleep(0.05)
+                val_pat = control.GetValuePattern()
+                if val_pat and val_pat.Value is not None:
+                    val_info = f" (valeur relue : {val_pat.Value!r})"
+            except Exception:
+                pass
+        return _done(
+            target,
+            f"Saisie PostMessage WM_CHAR ({chars} caractères) envoyée à {engine.describe(target)} sans vol de focus{val_info}.",
+            screenshot_after,
+            settle_ms,
+        )
 
-    _require_foreground(foreground, f"La saisie au clavier{' dans [' + str(element_index) + ']' if element_index is not None else ' sans element_index'}")
+    _require_foreground(
+        foreground,
+        f"La saisie au clavier{' dans [' + str(element_index) + ']' if element_index is not None else ' sans element_index'}",
+    )
     with engine.input_target(target):
         if element_index is not None and not engine.focus_element(control):
             raise ComputerError(

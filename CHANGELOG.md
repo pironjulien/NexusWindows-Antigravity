@@ -4,6 +4,21 @@ Toutes les modifications notables apportées au projet **Antigravity Computer Us
 
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/), et ce projet adhère au versioning sémantique.
 
+## [2.4.1] - 2026-10-11
+
+### Corrigé
+- **Détection de Processus & Fenêtres dans `launch_app`** : suppression du `shell=True` aveugle lors du lancement d'applications standard. Utilisation de `shlex.split(command, posix=False)` et `shell=False` afin que `proc.pid` appartienne directement à l'exécutable cible (et non à un processus intermédiaire éphémère `cmd.exe`). L'application hérite directement des indicateurs de démarrage `SW_SHOWMINNOACTIVE` et son `HWND` principal est immédiatement et précisément détecté en filtrant les fenêtres d'aide système (`Tooltip`, `Default IME`, `CiceroUIWndFrame`).
+- **Ciblage Précis des Contrôles & Saisie Furtive dans `type_text`** :
+  - Transmission systématique de `target_control_hwnd` (extrait de `control.NativeWindowHandle`) vers `post_message_type`, permettant aux contrôles Win32 de premier rang (`EditControl`, zones de texte) de recevoir directement les messages `WM_CHAR`.
+  - Prise en charge intégrale de `clear_first=True` via l'envoi préalable du message Win32 `WM_SETTEXT` (0x000C) avec chaîne vide.
+  - Relecture et vérification immédiate de la valeur textuelle modifiée via `GetValuePattern().Value` de UI Automation, intégrée dans le retour d'exécution (`verified_value`).
+- **Résolution Hiérarchique de Contrôles dans `post_message_click` sans interférence d'occlusion** :
+  - Remplacement de `WindowFromPoint` (qui retournait les fenêtres visibles au premier plan au lieu de la fenêtre ciblée en arrière-plan) par une descente hiérarchique récursive via l'API Win32 `RealChildWindowFromPoint(hwnd, pt_client)` ou le `target_control_hwnd` explicite. Le clic furtif atteint invariablement le bon contrôle enfant même lorsque la fenêtre cible est complètement recouverte ou hors champ.
+- **Conformité Totale Ruff & Formatage** : reformatage complet de l'ensemble du dépôt (26 fichiers) selon `ruff format` et résolution des lambdas multilignes dans les tests de fumée. 0 avertissement `ruff check` et 0 fichier non formaté sous `ruff format --check`.
+
+### Tests
+- Suite étendue à 98 tests unitaires 100 % passants (95 auparavant), incluant la vérification de la résolution hiérarchique de sous-contrôles (`RealChildWindowFromPoint`), le nettoyage préventif `WM_SETTEXT`, la relecture de valeur après saisie message, et le lancement avec tubes de commande shell.
+
 ## [2.4.0] - 2026-10-11
 
 ### Ajouté

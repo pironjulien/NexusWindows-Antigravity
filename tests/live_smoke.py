@@ -88,7 +88,9 @@ class Client:
         self.session = session
 
     async def __call__(self, name: str, **arguments):
-        if name in FOREGROUND_TOOLS:  # This harness drives a throwaway window: real input is the point, unless a test says otherwise.
+        if (
+            name in FOREGROUND_TOOLS
+        ):  # This harness drives a throwaway window: real input is the point, unless a test says otherwise.
             arguments.setdefault("foreground", True)
         result = await self.session.call_tool(name, arguments)
         text = "\n".join(c.text for c in result.content if c.type == "text")
@@ -155,8 +157,14 @@ async def click_markers(call: Client, log: EventLog, hwnd: int, label: str) -> d
         error, text, _ = await call("computer_click", hwnd=hwnd, x=x, y=y)
         events = log.wait(lambda e, n=name: e.get("event") == "marker" and e.get("marker") == n)
         hit = [e for e in events if e.get("event") == "marker" and e.get("marker") == name]
-        detail = f"({x},{y}) -> " + (f"écart {hit[0]['dx']},{hit[0]['dy']} px (tol {tol})" if hit else f"aucun clic reçu {text}")
-        check(f"{label} : clic sur {name} d'après la capture", not error and hit and abs(hit[0]["dx"]) <= tol and abs(hit[0]["dy"]) <= tol, detail)
+        detail = f"({x},{y}) -> " + (
+            f"écart {hit[0]['dx']},{hit[0]['dy']} px (tol {tol})" if hit else f"aucun clic reçu {text}"
+        )
+        check(
+            f"{label} : clic sur {name} d'après la capture",
+            not error and hit and abs(hit[0]["dx"]) <= tol and abs(hit[0]["dy"]) <= tol,
+            detail,
+        )
     return {"frame": frame, "image": img}
 
 
@@ -173,7 +181,11 @@ async def run() -> None:
             await session.initialize()
             call = Client(session)
             names = {t.name for t in (await session.list_tools()).tools}
-            check("11 outils exposés", names == EXPECTED_TOOLS, str(sorted(names ^ EXPECTED_TOOLS)) if names != EXPECTED_TOOLS else "")
+            check(
+                "11 outils exposés",
+                names == EXPECTED_TOOLS,
+                str(sorted(names ^ EXPECTED_TOOLS)) if names != EXPECTED_TOOLS else "",
+            )
 
             error, text, _ = await call("computer_click", x=10, y=10)
             check("aucune cible : refus sans clic", error and "Aucune cible" in text, text[:90])
@@ -191,7 +203,23 @@ async def run() -> None:
             check("pas de capture : refus des coordonnées", error and "Aucune capture" in text, text[:90])
 
             # Another process takes the foreground, then the target must be brought back.
-            processes.append(launch(obstacle_log.path, "-Mode", "Obstacle", "-Title", "Obstacle", "-X", "300", "-Y", "300", "-Width", "600", "-Height", "400"))
+            processes.append(
+                launch(
+                    obstacle_log.path,
+                    "-Mode",
+                    "Obstacle",
+                    "-Title",
+                    "Obstacle",
+                    "-X",
+                    "300",
+                    "-Y",
+                    "300",
+                    "-Width",
+                    "600",
+                    "-Height",
+                    "400",
+                )
+            )
             obstacle_log.wait(lambda e: e.get("event") == "obstacle_ready", 20)
             time.sleep(0.3)
             error, text, _ = await call("computer_focus_window", hwnd=hwnd)
@@ -203,21 +231,33 @@ async def run() -> None:
 
             normal = await click_markers(call, log, hwnd, "fenêtre normale")
 
-            error, text, images = await call("computer_click", hwnd=hwnd, x=center(find_color(normal["image"], RED))[0],
-                                             y=center(find_color(normal["image"], RED))[1], button="right")
+            error, text, images = await call(
+                "computer_click",
+                hwnd=hwnd,
+                x=center(find_color(normal["image"], RED))[0],
+                y=center(find_color(normal["image"], RED))[1],
+                button="right",
+            )
             hit = [e for e in log.wait(lambda e: e.get("event") == "marker") if e.get("event") == "marker"]
             check("clic droit", not error and hit and hit[0]["button"] == "Right", str(hit[:1]))
             bx, by = center(find_color(normal["image"], BLUE))
             error, text, _ = await call("computer_click", hwnd=hwnd, x=bx, y=by, click_count=2)
-            hit = [e for e in log.wait(lambda e: e.get("event") == "marker" and e.get("clicks") == 2) if e.get("clicks") == 2]
+            hit = [
+                e
+                for e in log.wait(lambda e: e.get("event") == "marker" and e.get("clicks") == 2)
+                if e.get("clicks") == 2
+            ]
             check("double-clic", not error and bool(hit), str(hit[:1]))
 
             error, state, _ = await call("computer_get_window_state", hwnd=hwnd)
             saisie = re.search(r'\[(\d+)\] (?:Edit|Document) "[^"]*"', state)
             valider = re.search(r'\[(\d+)\] Button "Valider"', state)
             first_row = re.search(r'\[(\d+)\] ListItem "Ligne 1" \((\d+),(\d+)\)', state)
-            check("UI Automation : champ, bouton et liste trouvés", bool(saisie and valider and first_row),
-                  f"{state.count(chr(10))} lignes")
+            check(
+                "UI Automation : champ, bouton et liste trouvés",
+                bool(saisie and valider and first_row),
+                f"{state.count(chr(10))} lignes",
+            )
             if not (saisie and valider and first_row):
                 print(state)
                 return
@@ -234,7 +274,9 @@ async def run() -> None:
             got = await submitted()
             check("saisie Unicode (accents, €, emoji, CJK, retour ligne)", not error and got == SAMPLE, repr(got))
 
-            error, text, _ = await call("computer_type_text", hwnd=hwnd, element_index=saisie, text="remplacé", clear_first=True)
+            error, text, _ = await call(
+                "computer_type_text", hwnd=hwnd, element_index=saisie, text="remplacé", clear_first=True
+            )
             got = await submitted()
             check("clear_first remplace le contenu", not error and got == "remplacé", f"{got!r} {text[:60]}")
 
@@ -246,11 +288,19 @@ async def run() -> None:
             await call("computer_click", hwnd=hwnd, element_index=saisie, method="mouse")
             error, text, _ = await call("computer_press_key", hwnd=hwnd, keys="2 A ,")
             got = await submitted()
-            check("touches seules tapées telles quelles (2, A, virgule sur AZERTY)", not error and got == "2A,", repr(got))
+            check(
+                "touches seules tapées telles quelles (2, A, virgule sur AZERTY)", not error and got == "2A,", repr(got)
+            )
 
-            error, text, _ = await call("computer_type_text", hwnd=hwnd, element_index=saisie, text="abc\n", clear_first=True)
+            error, text, _ = await call(
+                "computer_type_text", hwnd=hwnd, element_index=saisie, text="abc\n", clear_first=True
+            )
             got = await submitted()
-            check("clear_first avec retour ligne : Entrée réellement pressée", not error and got == "abc\n", f"{got!r} {text[:60]}")
+            check(
+                "clear_first avec retour ligne : Entrée réellement pressée",
+                not error and got == "abc\n",
+                f"{got!r} {text[:60]}",
+            )
 
             error, text, images = await call("computer_get_window_state", hwnd=hwnd, screenshot=True)
             badge = images and find_color(decode(images[0]), (230, 30, 90))
@@ -265,32 +315,66 @@ async def run() -> None:
                 error, text, _ = await call("computer_press_key", hwnd=hwnd, keys=combo)
                 keys = [e for e in log.wait(lambda e, c=code: e.get("code") == c) if e.get("event") == "key"]
                 pressed = [e for e in keys if e["code"] == code]
-                check(f"raccourci {combo} -> {code}", not error and pressed and "Control" in pressed[0]["mods"],
-                      str([e["code"] for e in keys]))
+                check(
+                    f"raccourci {combo} -> {code}",
+                    not error and pressed and "Control" in pressed[0]["mods"],
+                    str([e["code"] for e in keys]),
+                )
 
             log.drain(0.1)
-            error, text, _ = await call("computer_scroll", hwnd=hwnd, direction="down", amount=3,
-                                        x=int(first_row.group(2)), y=int(first_row.group(3)))
+            error, text, _ = await call(
+                "computer_scroll",
+                hwnd=hwnd,
+                direction="down",
+                amount=3,
+                x=int(first_row.group(2)),
+                y=int(first_row.group(3)),
+            )
             wheels = [e for e in log.drain(0.8) if e.get("event") == "wheel"]
-            check("molette : 3 crans vers le bas", not error and sum(e["delta"] for e in wheels) == -360 and wheels[-1]["top"] > 0,
-                  str([(e["delta"], e["top"]) for e in wheels]))
+            check(
+                "molette : 3 crans vers le bas",
+                not error and sum(e["delta"] for e in wheels) == -360 and wheels[-1]["top"] > 0,
+                str([(e["delta"], e["top"]) for e in wheels]),
+            )
 
             pad = find_color(normal["image"], LIME)
             if check("zone de glisser visible", pad is not None, str(pad)):
                 y = (pad[1] + pad[3]) // 2
-                error, text, _ = await call("computer_drag", hwnd=hwnd, from_x=pad[0] + 8, from_y=y, to_x=pad[2] - 8, to_y=y)
+                error, text, _ = await call(
+                    "computer_drag", hwnd=hwnd, from_x=pad[0] + 8, from_y=y, to_x=pad[2] - 8, to_y=y
+                )
                 events = log.wait(lambda e: e.get("event") == "drag_up")
                 down = next((e for e in events if e.get("event") == "drag_down"), None)
                 up = next((e for e in events if e.get("event") == "drag_up"), None)
-                check("glisser-déposer d'un bord à l'autre", not error and down and up and down["x"] < down["w"] * 0.15 and up["x"] > up["w"] * 0.85,
-                      f"down={down and (down['x'], down['w'])} up={up and (up['x'], up['w'])}")
+                check(
+                    "glisser-déposer d'un bord à l'autre",
+                    not error and down and up and down["x"] < down["w"] * 0.15 and up["x"] > up["w"] * 0.85,
+                    f"down={down and (down['x'], down['w'])} up={up and (up['x'], up['w'])}",
+                )
 
             # A topmost window of another process over the red marker: the click must be refused.
             frame = normal["frame"]
             rx, ry = center(find_color(normal["image"], RED))
             px = frame["left"] + round((rx + 0.5) * frame["pw"] / frame["iw"])
             py = frame["top"] + round((ry + 0.5) * frame["ph"] / frame["ih"])
-            processes.append(launch(obstacle_log.path, "-Mode", "Obstacle", "-Title", "Obstacle", "-TopMost", "-X", str(px - 60), "-Y", str(py - 60), "-Width", "120", "-Height", "120"))
+            processes.append(
+                launch(
+                    obstacle_log.path,
+                    "-Mode",
+                    "Obstacle",
+                    "-Title",
+                    "Obstacle",
+                    "-TopMost",
+                    "-X",
+                    str(px - 60),
+                    "-Y",
+                    str(py - 60),
+                    "-Width",
+                    "120",
+                    "-Height",
+                    "120",
+                )
+            )
             obstacle_log.wait(lambda e: e.get("event") == "obstacle_ready", 20)
             time.sleep(0.3)
             log.drain(0.1)
@@ -301,20 +385,45 @@ async def run() -> None:
             time.sleep(0.3)
 
             # Background mode: another process stays in front, covering the target, for the whole block.
-            processes.append(launch(obstacle_log.path, "-Mode", "Obstacle", "-Title", "Obstacle", "-X", "150", "-Y", "150", "-Width", "600", "-Height", "350"))
+            processes.append(
+                launch(
+                    obstacle_log.path,
+                    "-Mode",
+                    "Obstacle",
+                    "-Title",
+                    "Obstacle",
+                    "-X",
+                    "150",
+                    "-Y",
+                    "150",
+                    "-Width",
+                    "600",
+                    "-Height",
+                    "350",
+                )
+            )
             obstacle_log.wait(lambda e: e.get("event") == "obstacle_ready", 20)
             time.sleep(0.4)
-            front = lambda listing: next((item.split(" | ")[0] for item in listing.splitlines() if "[premier plan]" in item), "")  # noqa: E731
+
+            def front(listing):
+                return next((item.split(" | ")[0] for item in listing.splitlines() if "[premier plan]" in item), "")
+
             _, listing, _ = await call("computer_list_windows")
             front_before = front(listing)
 
             error, text, images = await call("computer_screenshot", hwnd=hwnd)
             covered_red = images and find_color(decode(images[0]), RED)
-            check("arrière-plan : capture d'une fenêtre recouverte", not error and "arrière-plan" in text and bool(covered_red), str(covered_red))
+            check(
+                "arrière-plan : capture d'une fenêtre recouverte",
+                not error and "arrière-plan" in text and bool(covered_red),
+                str(covered_red),
+            )
 
             _, state, _ = await call("computer_get_window_state", hwnd=hwnd)
             index = lambda pattern: int(m.group(1)) if (m := re.search(pattern, state)) else None  # noqa: E731
-            rows = [(int(i), int(n)) for i, n in re.findall(r'\[(\d+)\] ListItem "Ligne (\d+)"', state)]  # Visible rows only.
+            rows = [
+                (int(i), int(n)) for i, n in re.findall(r'\[(\d+)\] ListItem "Ligne (\d+)"', state)
+            ]  # Visible rows only.
             bg_check = index(r'\[(\d+)\] CheckBox "Option"')
             (bg_first, first_number), (bg_row, row_number) = rows[0], rows[1]
             bg_saisie, bg_valider = index(r'\[(\d+)\] (?:Edit|Document) "[^"]*"'), index(r'\[(\d+)\] Button "Valider"')
@@ -322,28 +431,77 @@ async def run() -> None:
             async def background(name, tool_args, event, ok_event):
                 log.drain(0.1)
                 error, text, _ = await call(tool_args.pop("tool"), hwnd=hwnd, foreground=False, **tool_args)
-                events = [e for e in log.wait(lambda e: e.get("event") == event, 2) if e.get("event") == event] if event else []
-                check(name, not error and (ok_event(events) if event else True), f"{text[:70]} | {events[-1:] if events else ''}")
+                events = (
+                    [e for e in log.wait(lambda e: e.get("event") == event, 2) if e.get("event") == event]
+                    if event
+                    else []
+                )
+                check(
+                    name,
+                    not error and (ok_event(events) if event else True),
+                    f"{text[:70]} | {events[-1:] if events else ''}",
+                )
                 return error, text
 
-            await background("arrière-plan : case cochée", {"tool": "computer_click", "element_index": bg_check}, "checked", lambda ev: ev and ev[-1]["value"] is True)
-            await background("arrière-plan : élément de liste sélectionné", {"tool": "computer_click", "element_index": bg_row}, "selected", lambda ev: ev and ev[-1]["index"] == row_number - 1)
-            await background("arrière-plan : champ rempli sans clavier", {"tool": "computer_type_text", "element_index": bg_saisie, "text": "fond", "clear_first": True}, None, None)
+            await background(
+                "arrière-plan : case cochée",
+                {"tool": "computer_click", "element_index": bg_check},
+                "checked",
+                lambda ev: ev and ev[-1]["value"] is True,
+            )
+            await background(
+                "arrière-plan : élément de liste sélectionné",
+                {"tool": "computer_click", "element_index": bg_row},
+                "selected",
+                lambda ev: ev and ev[-1]["index"] == row_number - 1,
+            )
+            await background(
+                "arrière-plan : champ rempli sans clavier",
+                {"tool": "computer_type_text", "element_index": bg_saisie, "text": "fond", "clear_first": True},
+                None,
+                None,
+            )
             _, state, _ = await call("computer_get_window_state", hwnd=hwnd)
-            check("arrière-plan : valeur du champ relue", '= "fond"' in state, next((item for item in state.splitlines() if "Document" in item or "Edit" in item), "")[:90])
-            await background("arrière-plan : bouton activé", {"tool": "computer_click", "element_index": bg_valider}, "button", lambda ev: bool(ev))
-            error, text = await background("arrière-plan : défilement de la liste", {"tool": "computer_scroll", "element_index": bg_first, "direction": "down", "amount": 3}, None, None)
+            check(
+                "arrière-plan : valeur du champ relue",
+                '= "fond"' in state,
+                next((item for item in state.splitlines() if "Document" in item or "Edit" in item), "")[:90],
+            )
+            await background(
+                "arrière-plan : bouton activé",
+                {"tool": "computer_click", "element_index": bg_valider},
+                "button",
+                lambda ev: bool(ev),
+            )
+            error, text = await background(
+                "arrière-plan : défilement de la liste",
+                {"tool": "computer_scroll", "element_index": bg_first, "direction": "down", "amount": 3},
+                None,
+                None,
+            )
             _, state, _ = await call("computer_get_window_state", hwnd=hwnd)
             now_first = next((int(n) for n in re.findall(r'ListItem "Ligne (\d+)"', state)), 0)
-            check("arrière-plan : liste effectivement défilée", not error and now_first > first_number, f"première ligne visible : {first_number} -> {now_first}")
+            check(
+                "arrière-plan : liste effectivement défilée",
+                not error and now_first > first_number,
+                f"première ligne visible : {first_number} -> {now_first}",
+            )
 
             log.drain(0.1)
             error, text, _ = await call("computer_click", hwnd=hwnd, x=50, y=88, foreground=False)
             stray = [e for e in log.drain(0.6) if e.get("event") == "marker"]
-            check("sans foreground=True : clic souris refusé", error and "foreground=True" in text and not stray, text[:90])
+            check(
+                "sans foreground=True : clic souris refusé",
+                error and "foreground=True" in text and not stray,
+                text[:90],
+            )
 
             _, listing, _ = await call("computer_list_windows")
-            check("arrière-plan : premier plan jamais repris", front(listing) == front_before and front_before != f"hwnd {hwnd}", f"{front_before} -> {front(listing)}")
+            check(
+                "arrière-plan : premier plan jamais repris",
+                front(listing) == front_before and front_before != f"hwnd {hwnd}",
+                f"{front_before} -> {front(listing)}",
+            )
             processes.pop().kill()
             time.sleep(0.3)
 
@@ -370,15 +528,27 @@ async def run() -> None:
             error, text, _ = await call("computer_click", hwnd=hwnd, x=5, y=5)
             check("taille changée : refus des anciennes coordonnées", error and "changé de taille" in text, text[:100])
             maximized = await click_markers(call, log, hwnd, "fenêtre agrandie")
-            check("cadre agrandi sans bordures invisibles", maximized["frame"]["left"] >= 0 and maximized["frame"]["top"] >= 0,
-                  f"origine ({maximized['frame']['left']},{maximized['frame']['top']})")
+            check(
+                "cadre agrandi sans bordures invisibles",
+                maximized["frame"]["left"] >= 0 and maximized["frame"]["top"] >= 0,
+                f"origine ({maximized['frame']['left']},{maximized['frame']['top']})",
+            )
 
             error, text, images = await call("computer_screenshot", hwnd=0)
             if check("capture écran entier", not error and len(images) == 1, text.splitlines()[0] if text else ""):
                 screen = frame_of(text)
                 window = maximized["frame"]
-                to_img = lambda sx, sy: (round((sx - screen["left"]) * screen["iw"] / screen["pw"]), round((sy - screen["top"]) * screen["ih"] / screen["ph"]))  # noqa: E731
-                region = (*to_img(window["left"], window["top"]), *to_img(window["left"] + window["pw"], window["top"] + window["ph"]))
+
+                def to_img(sx, sy):
+                    return (
+                        round((sx - screen["left"]) * screen["iw"] / screen["pw"]),
+                        round((sy - screen["top"]) * screen["ih"] / screen["ph"]),
+                    )
+
+                region = (
+                    *to_img(window["left"], window["top"]),
+                    *to_img(window["left"] + window["pw"], window["top"] + window["ph"]),
+                )
                 box = find_color(decode(images[0]), RED, region)
                 if check("repère rouge visible sur l'écran entier", box is not None, str(box)):
                     x, y = center(box)
@@ -386,14 +556,28 @@ async def run() -> None:
                     error, text, _ = await call("computer_click", hwnd=0, x=x, y=y)
                     hit = [e for e in log.wait(lambda e: e.get("event") == "marker") if e.get("event") == "marker"]
                     tol = tolerance(screen)
-                    check("clic écran entier d'après la capture", not error and hit and abs(hit[0]["dx"]) <= tol and abs(hit[0]["dy"]) <= tol,
-                          f"écart {hit[0]['dx'] if hit else '?'},{hit[0]['dy'] if hit else '?'} (tol {tol})")
+                    check(
+                        "clic écran entier d'après la capture",
+                        not error and hit and abs(hit[0]["dx"]) <= tol and abs(hit[0]["dy"]) <= tol,
+                        f"écart {hit[0]['dx'] if hit else '?'},{hit[0]['dy'] if hit else '?'} (tol {tol})",
+                    )
 
             box = find_color(maximized["image"], RED)
-            error, text, images = await call("computer_zoom", hwnd=hwnd, x1=max(0, box[0] - 20), y1=max(0, box[1] - 20), x2=box[2] + 20, y2=box[3] + 20)
+            error, text, images = await call(
+                "computer_zoom",
+                hwnd=hwnd,
+                x1=max(0, box[0] - 20),
+                y1=max(0, box[1] - 20),
+                x2=box[2] + 20,
+                y2=box[3] + 20,
+            )
             if check("zoom", not error and len(images) == 1, text[:80]):
                 zoomed = decode(images[0])
-                check("zoom : résolution supérieure à la capture", zoomed.width > (box[2] - max(0, box[0] - 20) + 20), f"{zoomed.size}")
+                check(
+                    "zoom : résolution supérieure à la capture",
+                    zoomed.width > (box[2] - max(0, box[0] - 20) + 20),
+                    f"{zoomed.size}",
+                )
 
             error, text, _ = await call("computer_press_key", hwnd=hwnd, keys="alt+f4")
             closed = [e for e in log.wait(lambda e: e.get("event") == "closed", 5) if e.get("event") == "closed"]
@@ -404,7 +588,10 @@ async def run() -> None:
                 process.kill()
 
     failed = [name for name, ok, _ in results if not ok]
-    print(f"\n{len(results) - len(failed)}/{len(results)} vérifications réussies" + (f" — échecs : {failed}" if failed else ""))
+    print(
+        f"\n{len(results) - len(failed)}/{len(results)} vérifications réussies"
+        + (f" — échecs : {failed}" if failed else "")
+    )
     sys.exit(1 if failed else 0)
 
 
