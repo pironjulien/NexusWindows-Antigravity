@@ -220,6 +220,13 @@ SMTO_BLOCK = 0x0001
 SMTO_ABORTIFHUNG = 0x0002
 SMTO_NOTIMEOUTIFNOTHUNG = 0x0008
 
+GetWindowLongPtrW = _proto(user32, "GetWindowLongPtrW", ctypes.c_ssize_t, HWND, ctypes.c_int)
+
+EM_SETSEL = 0x00B1
+WM_CLEAR = 0x0303
+ES_READONLY = 0x0800
+GWL_STYLE = -16
+
 WM_SETTEXT = 0x000C
 WM_MOUSEMOVE = 0x0200
 WM_LBUTTONDOWN = 0x0201
@@ -1660,16 +1667,24 @@ def post_message_type(
         target = focused if focused and IsWindow(focused) else hwnd
 
     if clear_first:
-        # Security & Integrity: NEVER send WM_SETTEXT to a top-level window (which would overwrite its window title!).
-        # Only send WM_SETTEXT to a dedicated child control HWND with a persistent buffer and timeout.
+        # Never send WM_SETTEXT (which corrupts button/window labels and bypasses ES_READONLY).
+        # Use EM_SETSEL(0, -1) + WM_CLEAR which only acts on real text fields and respects ES_READONLY.
         if target != hwnd and IsWindow(target):
-            empty_buf = ctypes.create_unicode_buffer("")
             res_val = ctypes.c_ssize_t(0)
             SendMessageTimeoutW(
                 target,
-                WM_SETTEXT,
+                EM_SETSEL,
                 0,
-                ctypes.addressof(empty_buf),
+                -1,
+                SMTO_ABORTIFHUNG | SMTO_NORMAL,
+                1000,
+                ctypes.byref(res_val),
+            )
+            SendMessageTimeoutW(
+                target,
+                WM_CLEAR,
+                0,
+                0,
                 SMTO_ABORTIFHUNG | SMTO_NORMAL,
                 1000,
                 ctypes.byref(res_val),
@@ -1700,10 +1715,10 @@ def launch_app(
     background: bool = True,
     wait_ms: int = 500,
 ) -> dict[str, Any]:
-    """Launches an application process.
+    """Launches an application process without stealing user foreground focus.
 
-    If background=True, starts with SW_SHOWMINNOACTIVE so it does NOT steal
-    user foreground focus. Returns pid, detected hwnd, and window title.
+    All sub-process stdio is redirected to DEVNULL to protect the MCP protocol from stream pollution.
+    Returns pid, detected hwnd, and window title.
     """
     startupinfo = None
     if sys.platform == "win32":
@@ -1712,18 +1727,35 @@ def launch_app(
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startupinfo.wShowWindow = SW_SHOWMINNOACTIVE
 
+    if command.startswith(("http://", "https://", "ms-settings:", "mailto:")):
+        os.startfile(command)
+        return {
+            "success": True,
+            "pid": None,
+            "hwnd": None,
+            "title": command,
+            "background": background,
+            "command": command,
+        }
+
     before_hwnds = {w["hwnd"] for w in list_windows(visible_only=False)}
 
     # Direct execution without shell: Windows CreateProcessW natively handles quoted paths and arguments.
-    # Fallback to shell=True only if redirection operators are present or command is built-in.
+    # Stdio redirected to DEVNULL to prevent any JSON-RPC corruption on MCP stdin/stdout channel.
     use_shell = any(op in command for op in ("|", ">", "<"))
     try:
-        if not use_shell:
-            proc = subprocess.Popen(command, startupinfo=startupinfo, shell=False)
-        else:
-            proc = subprocess.Popen(command, startupinfo=startupinfo, shell=True)
-    except (FileNotFoundError, OSError):
-        proc = subprocess.Popen(command, startupinfo=startupinfo, shell=True)
+        proc = subprocess.Popen(
+            command,
+            startupinfo=startupinfo,
+            shell=use_shell,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError as err:
+        raise ComputerError(f"Application ou commande introuvable : {command!r}") from err
+    except OSError as err:
+        raise ComputerError(f"Impossible de lancer l'application {command!r} : {err}") from err
 
     detected_hwnd = None
     detected_title = ""
@@ -2316,9 +2348,16 @@ def click(
     if element_index is not None:
         ctrl = _cached_element(target_hwnd, element_index)
         if method not in ("mouse", "post_message") and button == "left" and click_count == 1:
-            effect = background_activate(ctrl)
+            with ForegroundGuard(target_hwnd) as guard:
+                effect = background_activate(ctrl)
             if effect:
-                return {"success": True, "method": "uia_pattern", "effect": effect, "element_index": element_index}
+                return {
+                    "success": True,
+                    "method": "uia_pattern",
+                    "effect": effect,
+                    "element_index": element_index,
+                    "guard_note": guard.summary(),
+                }
         if method == "uia":
             raise ComputerError(f"L'élément [{element_index}] n'offre pas d'action UI Automation pour ce clic.")
     elif x is None or y is None:
@@ -2352,6 +2391,7 @@ def click(
         "y": click_y,
         "button": button,
         "count": click_count,
+        "element_index": element_index,
     }
 
 
@@ -2400,19 +2440,72 @@ def type_text(
     target_hwnd = _legacy_target(hwnd)
 
     ctrl = None
+    ctrl_hwnd = None
+    val_pat = None
+    initial_val = None
+
     if element_index is not None:
         ctrl = _cached_element(target_hwnd, element_index)
+        ctrl_hwnd = getattr(ctrl, "NativeWindowHandle", 0) or None
+
+        ctl_type = getattr(ctrl, "ControlTypeName", "")
+        if ctl_type in (
+            "ButtonControl",
+            "HyperlinkControl",
+            "ImageControl",
+            "MenuControl",
+            "MenuItemControl",
+            "ScrollBarControl",
+            "SeparatorControl",
+            "TabItemControl",
+            "ToolTipControl",
+        ):
+            raise ComputerError(
+                f"L'élément [{element_index}] est un contrôle de type {ctl_type} et non un champ de saisie textuelle."
+            )
+
+        if ctrl_hwnd:
+            cls = window_class(ctrl_hwnd).lower()
+            if cls in ("button", "static", "scrollbar"):
+                raise ComputerError(
+                    f"L'élément [{element_index}] est un contrôle Win32 de classe {cls!r} et non un champ de saisie textuelle."
+                )
+
+        # 1. Check read-only status and record initial value upfront before modifying anything
+        try:
+            val_pat = ctrl.GetValuePattern()
+            if val_pat:
+                initial_val = val_pat.Value or ""
+                if getattr(val_pat, "IsReadOnly", False):
+                    raise ComputerError(
+                        f"Le champ [{element_index}] est en lecture seule (IsReadOnly=True). Saisie refusée."
+                    )
+        except ComputerError:
+            raise
+        except Exception:
+            pass
+
+        if ctrl_hwnd:
+            style = GetWindowLongPtrW(ctrl_hwnd, GWL_STYLE)
+            if style & ES_READONLY:
+                raise ComputerError(f"Le champ [{element_index}] est en lecture seule (ES_READONLY). Saisie refusée.")
+
+        # 2. UIA ValuePattern (auto or uia method)
         if method not in ("keyboard", "post_message"):
-            if set_value(ctrl, text, append=not clear_first):
-                return {
-                    "success": True,
-                    "method": "uia_value_pattern",
-                    "element_index": element_index,
-                    "length": len(text),
-                }
+            with ForegroundGuard(target_hwnd) as guard:
+                if set_value(ctrl, text, append=not clear_first):
+                    return {
+                        "success": True,
+                        "method": "uia_value_pattern",
+                        "element_index": element_index,
+                        "length": len(text),
+                        "verified_value": val_pat.Value if val_pat else None,
+                        "guard_note": guard.summary(),
+                    }
         if method == "uia":
             raise ComputerError(f"L'élément [{element_index}] ne supporte pas ValuePattern.")
 
+    # 3. PostMessage method
     if method == "post_message":
         if element_index is None:
             focused = get_focused_child_hwnd(target_hwnd)
@@ -2421,37 +2514,72 @@ def type_text(
                     "Aucun contrôle spécifié (element_index manquant) et aucun champ de saisie n'a le focus "
                     "dans la fenêtre pour recevoir la saisie post_message."
                 )
-            ctrl_hwnd = focused
+            cls = window_class(focused).lower()
+            if cls in ("button", "static", "scrollbar"):
+                raise ComputerError(
+                    f"Le contrôle actuellement focalisé est de type {cls!r} et non un champ de saisie textuelle."
+                )
+            style = GetWindowLongPtrW(focused, GWL_STYLE)
+            if style & ES_READONLY:
+                raise ComputerError(
+                    "Le champ ayant actuellement le focus est en lecture seule (ES_READONLY). Saisie refusée."
+                )
+            target_target = focused
         else:
-            ctrl_hwnd = getattr(ctrl, "NativeWindowHandle", 0) if ctrl is not None else None
-            if not ctrl_hwnd and ctrl is not None and clear_first:
+            if not ctrl_hwnd:
+                # Control has no Win32 HWND (WPF, Chromium, WinUI)
+                if val_pat and not getattr(val_pat, "IsReadOnly", False):
+                    with ForegroundGuard(target_hwnd) as guard:
+                        if set_value(ctrl, text, append=not clear_first):
+                            return {
+                                "success": True,
+                                "method": "uia_value_pattern",
+                                "element_index": element_index,
+                                "length": len(text),
+                                "verified_value": val_pat.Value,
+                                "guard_note": guard.summary(),
+                            }
+                raise ComputerError(
+                    f"[{element_index}] n'a pas de HWND Win32 propre ni de ValuePattern supporté pour post_message. "
+                    "Utilisez method='keyboard' avec foreground=True."
+                )
+            target_target = ctrl_hwnd
+
+        chars = post_message_type(target_hwnd, text, target_control_hwnd=target_target, clear_first=clear_first)
+
+        # 4. Strict multi-sample polling verification up to 1.0s
+        verified_val = None
+        if ctrl is not None and val_pat:
+            deadline = time.time() + 1.0
+            norm_expected = text.replace("\r\n", "\n").replace("\r", "\n")
+            norm_init = initial_val.replace("\r\n", "\n").replace("\r", "\n") if initial_val else ""
+            success = False
+            last_read = ""
+            while time.time() < deadline:
+                time.sleep(0.05)
                 try:
-                    val_pat = ctrl.GetValuePattern()
-                    if val_pat:
-                        val_pat.SetValue("")
+                    current_val = val_pat.Value or ""
+                    last_read = current_val
+                    norm_current = current_val.replace("\r\n", "\n").replace("\r", "\n")
+                    if clear_first:
+                        if norm_current == norm_expected:
+                            success = True
+                            verified_val = current_val
+                            break
+                    else:
+                        if norm_expected in norm_current and (initial_val is None or norm_current != norm_init):
+                            success = True
+                            verified_val = current_val
+                            break
                 except Exception:
                     pass
 
-        chars = post_message_type(target_hwnd, text, target_control_hwnd=ctrl_hwnd, clear_first=clear_first)
-        verified_val = None
-        if ctrl is not None:
-            try:
-                time.sleep(0.05)
-                val_pat = ctrl.GetValuePattern()
-                if val_pat and val_pat.Value is not None:
-                    current_val = val_pat.Value
-                    norm_text = text.replace("\r\n", "\n").replace("\r", "\n")
-                    norm_val = current_val.replace("\r\n", "\n").replace("\r", "\n")
-                    if norm_text not in norm_val:
-                        raise ComputerError(
-                            f"Échec de la saisie dans [{element_index}] : la valeur relue ({current_val!r}) "
-                            f"ne contient pas le texte attendu ({text!r})."
-                        )
-                    verified_val = current_val
-            except ComputerError:
-                raise
-            except Exception:
-                pass
+            if not success:
+                raise ComputerError(
+                    f"Échec de la saisie dans [{element_index}] : la valeur relue ({last_read!r}) "
+                    f"ne correspond pas au résultat attendu ({text!r})."
+                )
+
         result_payload = {
             "success": True,
             "method": "post_message_char",

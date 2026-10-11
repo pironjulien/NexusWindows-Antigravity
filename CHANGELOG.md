@@ -4,6 +4,31 @@ Toutes les modifications notables apportées au projet **Antigravity Computer Us
 
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/), et ce projet adhère au versioning sémantique.
 
+## [2.4.3] - 2026-10-11
+
+### Corrigé
+- **Protection Absolue des Boutons & Contrôles Non-Éditables dans `clear_first` (`EM_SETSEL` + `WM_CLEAR`)** :
+  - Remplacement définitif de `WM_SETTEXT` par la séquence standard Win32 `EM_SETSEL(0, -1)` suivi de `WM_CLEAR(0, 0)` via `SendMessageTimeoutW`. Ces messages ne sont traités que par les contrôles d'édition textuelle réels et sont strictement ignorés par les boutons (`BUTTON`), cases à cocher, cadres et libellés statiques. Les libellés de boutons (ex. « Valider ») sont 100 % préservés.
+  - Respect natif et inviolable du style Win32 `ES_READONLY` : le système Windows refuse nativement le message `WM_CLEAR` sur les contrôles en lecture seule.
+- **Rejet Upfront des Contrôles Non-Textuels et Read-Only dans `type_text`** :
+  - Rejet explicite avec levée immédiate de `ComputerError` si le contrôle ciblé est un bouton, lien hypertexte, image, menu ou barre de défilement (détecté via `ControlTypeName` UIA et `GetClassNameW` Win32), que ce soit par `element_index` ou par focus actif.
+  - Rejet explicite avec `ComputerError` si le champ est en lecture seule (`val_pat.IsReadOnly` ou style Win32 `ES_READONLY`).
+  - Repli transparent et sécurisé sur UI Automation (`set_value`) pour les contrôles sans handle Win32 propre (`NativeWindowHandle == 0`) comme Chromium, WPF et WinUI, sans jamais polluer le contrôle focalisé par hasard.
+- **Vérification Déterministe par Polling Multi-Échantillons dans `type_text`** :
+  - Boucle de vérification par scrutation active jusqu'à 1,0 s (par tranches de 50 ms) avec normalisation des sauts de ligne.
+  - Validation par égalité stricte pour `clear_first=True` (`norm_current == norm_expected`) et détection de modification effective par rapport à l'état initial pour l'ajout incrémental, éliminant tout faux positif sur sous-chaîne ou écriture asynchrone différée.
+- **Isolation Stricte des Flux Stdio et Sécurisation du Canal MCP dans `launch_app`** :
+  - Redirection systématique de `stdin`, `stdout` et `stderr` vers `subprocess.DEVNULL` sur tous les processus enfants lancés, éradiquant tout risque de pollution ou de désynchronisation du canal JSON-RPC MCP.
+  - Levée immédiate de `ComputerError` dès lors qu'une application ou un exécutable est introuvable, interdisant tout repli silencieux erratique sur `cmd.exe`.
+  - Lancement natif sécurisé des protocoles et URLs (`http:`, `https:`, `ms-settings:`, `mailto:`) via `os.startfile`.
+- **Unification Architecturale Intégrale des Adaptateurs (Zéro Dette Technique)** :
+  - `server.py`, `adapters/claude/server.py`, et `adapters/codex/server.py` délèguent désormais 100 % de l'exécution de `computer_click` et `computer_type_text` directement au moteur central `core.engine`.
+  - Élimination des 4 copies divergentes de logique d'injection, de vérification et de `ForegroundGuard`.
+
+### Tests
+- Suite étendue à 104 tests (100 auparavant), incluant un banc de test d'intégration Win32 réel créant une fenêtre native avec contrôles `EDIT`, `EDIT` `ES_READONLY` et `BUTTON` pour valider empiriquement le comportement en conditions réelles.
+- 100 % passants sur `pytest`, 0 avertissement `ruff check` et 0 fichier non conforme sous `ruff format --check`.
+
 ## [2.4.2] - 2026-10-11
 
 ### Corrigé

@@ -1,5 +1,6 @@
 import contextlib
 import ctypes
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -566,7 +567,7 @@ def test_input_target_never_activates_without_permission(monkeypatch, fake_deskt
 def test_adapters_send_physical_input_only_inside_input_target(name):
     source = (Path(__file__).resolve().parents[1] / name).read_text(encoding="utf-8")
     assert "ensure_input_target" not in source  # Activation outside the transaction reopens the race.
-    assert source.count("engine.input_target(") == 7
+    assert source.count("engine.input_target(") == 4
 
 
 def test_legacy_element_from_another_window_is_stale(monkeypatch, fake_desktop):
@@ -666,15 +667,15 @@ def test_post_message_type_mocked(monkeypatch):
     )
     monkeypatch.setattr(engine.time, "sleep", lambda s: None)
 
-    # 1. With target_control_hwnd != hwnd: WM_SETTEXT sent to child
+    # 1. With target_control_hwnd != hwnd: EM_SETSEL and WM_CLEAR sent to child (never WM_SETTEXT)
     count = engine.post_message_type(12345, "A\nB", target_control_hwnd=99999, clear_first=True)
     assert count == 3
-    assert len(sent_messages) == 1
-    assert sent_messages[0][0] == 99999
-    assert sent_messages[0][1] == engine.WM_SETTEXT
+    assert len(sent_messages) == 2
+    assert sent_messages[0] == (99999, engine.EM_SETSEL, 0, -1)
+    assert sent_messages[1] == (99999, engine.WM_CLEAR, 0, 0)
     assert (99999, engine.WM_CHAR, 65, 0) in chars_posted
 
-    # 2. When target == hwnd: WM_SETTEXT must NEVER be sent to root hwnd!
+    # 2. When target == hwnd: EM_SETSEL/WM_CLEAR must NEVER be sent to root hwnd!
     sent_messages.clear()
     monkeypatch.setattr(engine, "get_focused_child_hwnd", lambda h: None)
     count2 = engine.post_message_type(12345, "C", clear_first=True)
@@ -688,10 +689,11 @@ def test_launch_app_background_uses_sw_showminnoactive(monkeypatch):
     class FakeProc:
         pid = 4242
 
-    def mock_popen(args, startupinfo=None, shell=False):
+    def mock_popen(args, startupinfo=None, shell=False, **kwargs):
         captured["args"] = args
         captured["startupinfo"] = startupinfo
         captured["shell"] = shell
+        captured["kwargs"] = kwargs
         return FakeProc()
 
     monkeypatch.setattr(engine.subprocess, "Popen", mock_popen)
@@ -714,6 +716,9 @@ def test_launch_app_background_uses_sw_showminnoactive(monkeypatch):
     assert captured["args"] == "notepad.exe"
     assert captured["shell"] is False
     assert captured["startupinfo"].wShowWindow == engine.SW_SHOWMINNOACTIVE
+    assert captured["kwargs"]["stdin"] == subprocess.DEVNULL
+    assert captured["kwargs"]["stdout"] == subprocess.DEVNULL
+    assert captured["kwargs"]["stderr"] == subprocess.DEVNULL
 
 
 def test_click_method_post_message(monkeypatch):
@@ -764,15 +769,18 @@ def test_type_text_post_message_with_element_and_readback(monkeypatch):
     calls = []
 
     class FakeValPat:
-        Value = "Expected Test Value"
+        Value = "Test"
 
     class FakeControl:
         NativeWindowHandle = 55555
+        ControlTypeName = "EditControl"
 
         def GetValuePattern(self):
             return FakeValPat()
 
     monkeypatch.setattr(engine, "IsWindow", lambda h: True)
+    monkeypatch.setattr(engine, "window_class", lambda h: "Edit")
+    monkeypatch.setattr(engine, "GetWindowLongPtrW", lambda h, idx: 0)
     monkeypatch.setattr(engine, "_cached_element", lambda h, idx: FakeControl())
     monkeypatch.setattr(
         engine,
@@ -785,8 +793,50 @@ def test_type_text_post_message_with_element_and_readback(monkeypatch):
 
     res = engine.type_text("Test", hwnd=12345, element_index=3, method="post_message", clear_first=True)
     assert res["success"] is True
-    assert res["verified_value"] == "Expected Test Value"
+    assert res["verified_value"] == "Test"
     assert calls == [(12345, "Test", 55555, True)]
+
+
+def test_type_text_rejects_readonly_control(monkeypatch):
+    class ReadOnlyValPat:
+        Value = "Locked"
+        IsReadOnly = True
+
+    class FakeControl:
+        NativeWindowHandle = 55555
+        ControlTypeName = "EditControl"
+
+        def GetValuePattern(self):
+            return ReadOnlyValPat()
+
+    monkeypatch.setattr(engine, "IsWindow", lambda h: True)
+    monkeypatch.setattr(engine, "window_class", lambda h: "Edit")
+    monkeypatch.setattr(engine, "GetWindowLongPtrW", lambda h, idx: 0)
+    monkeypatch.setattr(engine, "_cached_element", lambda h, idx: FakeControl())
+
+    with pytest.raises(ComputerError, match="en lecture seule"):
+        engine.type_text("NewText", hwnd=12345, element_index=3, method="post_message")
+
+
+def test_type_text_rejects_button_control(monkeypatch):
+    class FakeControl:
+        NativeWindowHandle = 66666
+        ControlTypeName = "ButtonControl"
+
+        def GetValuePattern(self):
+            return None
+
+    monkeypatch.setattr(engine, "IsWindow", lambda h: True)
+    monkeypatch.setattr(engine, "window_class", lambda h: "Button")
+    monkeypatch.setattr(engine, "_cached_element", lambda h, idx: FakeControl())
+
+    with pytest.raises(ComputerError, match="champ de saisie textuelle"):
+        engine.type_text("ClickMe", hwnd=12345, element_index=3, method="post_message")
+
+
+def test_launch_app_not_found_raises():
+    with pytest.raises(ComputerError, match="Application ou commande introuvable"):
+        engine.launch_app("non_existent_binary_12345_xyz.exe", background=True, wait_ms=10)
 
 
 def test_type_text_post_message_verification_failure_raises(monkeypatch):
@@ -795,11 +845,14 @@ def test_type_text_post_message_verification_failure_raises(monkeypatch):
 
     class FakeControl:
         NativeWindowHandle = 55555
+        ControlTypeName = "EditControl"
 
         def GetValuePattern(self):
             return FakeValPat()
 
     monkeypatch.setattr(engine, "IsWindow", lambda h: True)
+    monkeypatch.setattr(engine, "window_class", lambda h: "Edit")
+    monkeypatch.setattr(engine, "GetWindowLongPtrW", lambda h, idx: 0)
     monkeypatch.setattr(engine, "_cached_element", lambda h, idx: FakeControl())
     monkeypatch.setattr(
         engine,
@@ -840,9 +893,10 @@ def test_launch_app_with_pipes_uses_shell(monkeypatch):
     class FakeProc:
         pid = 7777
 
-    def mock_popen(args, startupinfo=None, shell=False):
+    def mock_popen(args, startupinfo=None, shell=False, **kwargs):
         captured["args"] = args
         captured["shell"] = shell
+        captured["kwargs"] = kwargs
         return FakeProc()
 
     monkeypatch.setattr(engine.subprocess, "Popen", mock_popen)
@@ -857,3 +911,99 @@ def test_launch_app_with_pipes_uses_shell(monkeypatch):
     assert res["success"] is True
     assert res["pid"] == 7777
     assert captured["shell"] is True
+    assert captured["kwargs"]["stdin"] == subprocess.DEVNULL
+
+
+def test_real_win32_controls_empirical_validation():
+    """Empirical integration test matching Claude's disposable test window scenario:
+
+    Creates a real Win32 top-level window with:
+      - Normal EDIT control
+      - Read-only EDIT control (ES_READONLY)
+      - BUTTON control ("Valider")
+    Validates:
+      1. clear_first on EDIT clears and replaces text.
+      2. clear_first targeting BUTTON NEVER erases the button label ('Valider' is preserved).
+      3. clear_first targeting ES_READONLY EDIT NEVER modifies the text.
+    """
+    import sys
+
+    if sys.platform != "win32":
+        pytest.skip("Win32 test requires Windows")
+
+    user32 = ctypes.windll.user32
+    WS_OVERLAPPEDWINDOW = 0x00CF0000
+    WS_VISIBLE = 0x10000000
+    WS_CHILD = 0x40000000
+    ES_READONLY = 0x0800
+    ES_AUTOHSCROLL = 0x0080
+
+    # Create disposable hidden/offscreen top-level window
+    hwnd_top = user32.CreateWindowExW(
+        0, "STATIC", "Empirical Test Bench", WS_OVERLAPPEDWINDOW, -2000, -2000, 300, 300, 0, 0, 0, 0
+    )
+    assert hwnd_top, "Failed to create top-level test window"
+
+    try:
+        # 1. Normal Edit Control
+        hwnd_edit = user32.CreateWindowExW(
+            0, "EDIT", "InitialValue", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 10, 10, 200, 25, hwnd_top, 101, 0, 0
+        )
+        assert hwnd_edit
+
+        # 2. Read-Only Edit Control
+        hwnd_readonly = user32.CreateWindowExW(
+            0,
+            "EDIT",
+            "ReadOnlyText",
+            WS_CHILD | WS_VISIBLE | ES_READONLY | ES_AUTOHSCROLL,
+            10,
+            40,
+            200,
+            25,
+            hwnd_top,
+            102,
+            0,
+            0,
+        )
+        assert hwnd_readonly
+
+        # 3. Button Control ("Valider")
+        hwnd_button = user32.CreateWindowExW(
+            0, "BUTTON", "Valider", WS_CHILD | WS_VISIBLE, 10, 70, 100, 25, hwnd_top, 103, 0, 0
+        )
+        assert hwnd_button
+
+        def read_text(h):
+            buf = ctypes.create_unicode_buffer(128)
+            engine.GetWindowTextW(h, buf, 128)
+            return buf.value
+
+        assert read_text(hwnd_button) == "Valider"
+        assert read_text(hwnd_edit) == "InitialValue"
+        assert read_text(hwnd_readonly) == "ReadOnlyText"
+
+        def pump_messages():
+            # Dispatch any queued messages for in-process test window
+            msg_buf = ctypes.create_string_buffer(48)
+            while user32.PeekMessageW(msg_buf, 0, 0, 0, 1):  # PM_REMOVE = 1
+                user32.TranslateMessage(msg_buf)
+                user32.DispatchMessageW(msg_buf)
+
+        # Test 1: clear_first on BUTTON must NOT erase label
+        engine.post_message_type(hwnd_top, "Ignored", target_control_hwnd=hwnd_button, clear_first=True)
+        pump_messages()
+        assert read_text(hwnd_button) == "Valider", "Button label was wiped out by clear_first!"
+
+        # Test 2: clear_first on ES_READONLY EDIT must NOT modify text
+        engine.post_message_type(hwnd_top, "AttemptedWrite", target_control_hwnd=hwnd_readonly, clear_first=True)
+        pump_messages()
+        assert read_text(hwnd_readonly) == "ReadOnlyText", "Read-only edit was modified by clear_first!"
+
+        # Test 3: clear_first on normal EDIT replaces text
+        engine.post_message_type(hwnd_top, "ReplacedValue", target_control_hwnd=hwnd_edit, clear_first=True)
+        pump_messages()
+        assert read_text(hwnd_edit) == "ReplacedValue", "Normal edit did not receive typed text"
+
+    finally:
+        user32.DestroyWindow(hwnd_top)

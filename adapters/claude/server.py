@@ -160,63 +160,51 @@ def computer_click(
 ) -> Content:
     """Clique sur un élément [N] de computer_get_window_state, ou sur le point (x, y) de la dernière capture."""
     target = engine.resolve_target(hwnd)
-    if method not in ("auto", "uia", "post_message", "mouse"):
-        raise ComputerError(f"method inconnue : {method!r} (auto, uia, post_message, mouse).")
-    simple = button == "left" and click_count == 1
+    res = engine.click(
+        hwnd=target,
+        element_index=element_index,
+        x=x,
+        y=y,
+        button=button,
+        click_count=click_count,
+        foreground=foreground,
+        method=method,
+    )
     if element_index is not None:
-        control = engine.element(target, element_index)
-        label = f"[{element_index}] {engine._quoted(control.Name, 60)}"
-        if method not in ("mouse", "post_message") and simple:
-            with engine.ForegroundGuard(target) as guard:
-                effect = engine.background_activate(control)
-            if effect:
-                return _background(target, f"{label} : {effect}.", guard, screenshot_after, settle_ms)
-        if method == "uia":
-            raise ComputerError(f"{label} n'offre pas d'action UI Automation pour ce clic : rien n'a été fait.")
-        if method == "post_message":
-            center = engine.element_center(control, engine.current_frame(target))
-            if center is None:
-                raise ComputerError(f"{label} n'est pas visible dans la fenêtre : rien n'a été cliqué.")
-            ctrl_hwnd = getattr(control, "NativeWindowHandle", 0) or None
-            engine.post_message_click(target, *center, button=button, count=click_count, target_control_hwnd=ctrl_hwnd)
-            return _done(
-                target,
-                f"Clic PostMessage {button} ×{click_count} sur {label} (sans vol de focus).",
-                screenshot_after,
-                settle_ms,
-            )
+        try:
+            control = engine.element(target, element_index)
+            label = f"[{element_index}] {engine._quoted(control.Name, 60)}"
+        except Exception:
+            label = f"[{element_index}]"
+    else:
+        label = f"en ({x},{y})"
 
-        _require_foreground(foreground, f"Ce clic sur {label}")
-        with engine.input_target(target):
-            center = engine.element_center(control, engine.current_frame(target))
-            if center is None:
-                raise ComputerError(f"{label} n'est pas visible dans la fenêtre : rien n'a été cliqué.")
-            engine.ensure_point(target, *center)
-            engine.click_at(*center, button=button, count=click_count)
-        return _done(target, f"Clic souris {button} ×{click_count} sur {label}.", screenshot_after, settle_ms)
-
-    if x is None or y is None:
-        raise ComputerError("Indiquez element_index, ou x et y.")
-    frame = engine.action_frame(target)
-    frame.check(x, y)
-    point = frame.to_screen(x, y)
-
-    if method == "post_message":
-        engine.post_message_click(target, *point, button=button, count=click_count)
+    method_used = res.get("method")
+    if method_used == "uia_pattern":
+        effect = res.get("effect", "activé")
+        note = res.get("guard_note", "")
+        msg = f"{label} : {effect}."
+        if note:
+            msg += f" ({note})"
+        return _done(target, msg, screenshot_after, settle_ms)
+    elif method_used == "post_message":
         return _done(
             target,
-            f"Clic PostMessage {button} ×{click_count} en ({x},{y}) (sans vol de focus).",
+            f"Clic PostMessage {button} ×{click_count} sur {label} (sans vol de focus)."
+            if element_index is not None
+            else f"Clic PostMessage {button} ×{click_count} en ({x},{y}) (sans vol de focus).",
             screenshot_after,
             settle_ms,
         )
-
-    if method == "uia":
-        raise ComputerError("Le clic à des coordonnées (x, y) ne supporte pas la méthode UIA pure.")
-
-    _require_foreground(foreground, "Un clic à une position")
-    with engine.input_target(target, point):
-        engine.click_at(*point, button=button, count=click_count)
-    return _done(target, f"Clic souris {button} ×{click_count} en ({x},{y}).", screenshot_after, settle_ms)
+    else:
+        return _done(
+            target,
+            f"Clic souris {button} ×{click_count} sur {label}."
+            if element_index is not None
+            else f"Clic souris {button} ×{click_count} en ({x},{y}).",
+            screenshot_after,
+            settle_ms,
+        )
 
 
 @tool
@@ -254,87 +242,33 @@ def computer_type_text(
     if len(text) > MAX_TEXT:
         raise ComputerError(f"Texte trop long ({len(text)} caractères, maximum {MAX_TEXT}) : découpez-le.")
     target = engine.resolve_target(hwnd)
-    if method not in ("auto", "uia", "post_message", "keyboard"):
-        raise ComputerError(f"method inconnue : {method!r} (auto, uia, post_message, keyboard).")
-
-    if element_index is not None:
-        control = engine.element(target, element_index)
-        if method not in ("keyboard", "post_message"):
-            with engine.ForegroundGuard(target) as guard:
-                written = engine.set_value(control, text, append=not clear_first)
-            if written:
-                verb = "remplacé par" if clear_first else "complété de"
-                return _background(
-                    target,
-                    f"[{element_index}] {verb} {len(text)} caractères (arrière-plan, valeur relue).",
-                    guard,
-                    screenshot_after,
-                    settle_ms,
-                )
-        if method == "uia":
-            raise ComputerError(f"[{element_index}] n'accepte pas l'écriture UI Automation : rien n'a été fait.")
-
-    if method == "post_message":
-        if element_index is None:
-            focused = engine.get_focused_child_hwnd(target)
-            if not focused:
-                raise ComputerError(
-                    "Aucun contrôle spécifié (element_index manquant) et aucun champ de saisie n'a le focus "
-                    "dans la fenêtre pour recevoir la saisie post_message."
-                )
-            ctrl_hwnd = focused
-        else:
-            ctrl_hwnd = getattr(control, "NativeWindowHandle", 0) or None
-            if not ctrl_hwnd and clear_first:
-                try:
-                    val_pat = control.GetValuePattern()
-                    if val_pat:
-                        val_pat.SetValue("")
-                except Exception:
-                    pass
-
-        chars = engine.post_message_type(target, text, target_control_hwnd=ctrl_hwnd, clear_first=clear_first)
-        val_info = ""
-        if element_index is not None:
-            try:
-                time.sleep(0.05)
-                val_pat = control.GetValuePattern()
-                if val_pat and val_pat.Value is not None:
-                    current_val = val_pat.Value
-                    norm_text = text.replace("\r\n", "\n").replace("\r", "\n")
-                    norm_val = current_val.replace("\r\n", "\n").replace("\r", "\n")
-                    if norm_text not in norm_val:
-                        raise ComputerError(
-                            f"Échec de la saisie dans [{element_index}] : la valeur relue ({current_val!r}) "
-                            f"ne contient pas le texte attendu ({text!r})."
-                        )
-                    val_info = f" (valeur vérifiée : {current_val!r})"
-            except ComputerError:
-                raise
-            except Exception:
-                pass
+    res = engine.type_text(
+        text=text,
+        hwnd=target,
+        element_index=element_index,
+        clear_first=clear_first,
+        foreground=foreground,
+        method=method,
+    )
+    method_used = res.get("method")
+    if method_used == "uia_value_pattern":
+        verb = "remplacé par" if clear_first else "complété de"
+        note = res.get("guard_note", "")
+        msg = f"[{element_index}] {verb} {len(text)} caractères (arrière-plan, valeur relue)."
+        if note:
+            msg += f" ({note})"
+        return _done(target, msg, screenshot_after, settle_ms)
+    elif method_used == "post_message_char":
+        chars = res.get("length", len(text))
+        val_info = f" (valeur vérifiée : {res['verified_value']!r})" if "verified_value" in res else ""
         return _done(
             target,
             f"Saisie PostMessage WM_CHAR ({chars} caractères) envoyée à {engine.describe(target)} sans vol de focus{val_info}.",
             screenshot_after,
             settle_ms,
         )
-
-    _require_foreground(
-        foreground,
-        f"La saisie au clavier{' dans [' + str(element_index) + ']' if element_index is not None else ' sans element_index'}",
-    )
-    with engine.input_target(target):
-        if element_index is not None and not engine.focus_element(control):
-            raise ComputerError(
-                f"[{element_index}] n'a pas pu recevoir le focus (disparu, désactivé ou non focusable) : "
-                "relancez computer_get_window_state. Rien n'a été tapé."
-            )
-        if clear_first:
-            engine.press_combo("ctrl+a")
-            engine.press_combo("backspace")
-        engine.type_unicode(text)
-    return _done(target, f"{len(text)} caractères tapés au clavier.", screenshot_after, settle_ms)
+    else:
+        return _done(target, f"{len(text)} caractères tapés au clavier.", screenshot_after, settle_ms)
 
 
 @tool
