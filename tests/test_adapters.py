@@ -62,6 +62,7 @@ def test_antigravity_adapter_tools():
         "computer_scroll",
         "computer_drag",
         "computer_take_screenshot",
+        "computer_launch_app",
         "computer_spotlight_status",
         "computer_spotlight_toggle",
     }

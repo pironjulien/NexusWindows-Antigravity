@@ -174,23 +174,30 @@ def computer_click(
 
     Élément + clic gauche simple : en arrière-plan via UI Automation (bouton/lien/menu activé, case cochée, élément
     de liste/onglet sélectionné, liste déroulante dépliée), avec relecture de l'état quand c'est possible.
-    method : auto (arrière-plan, sinon souris), uia (arrière-plan seulement), mouse (souris seulement).
+    method : auto (arrière-plan, sinon souris), uia (arrière-plan seulement), post_message (clic message sans focus), mouse (souris seulement).
     Souris (coordonnées, clic droit, double-clic, élément sans UI Automation) : exige foreground=True.
     """
     target = engine.resolve_target(hwnd)
-    if method not in ("auto", "uia", "mouse"):
-        raise ComputerError(f"method inconnue : {method!r} (auto, uia, mouse).")
+    if method not in ("auto", "uia", "post_message", "mouse"):
+        raise ComputerError(f"method inconnue : {method!r} (auto, uia, post_message, mouse).")
     simple = button == "left" and click_count == 1
     if element_index is not None:
         control = engine.element(target, element_index)
         label = f"[{element_index}] {engine._quoted(control.Name, 60)}"
-        if method != "mouse" and simple:
+        if method not in ("mouse", "post_message") and simple:
             with engine.ForegroundGuard(target) as guard:
                 effect = engine.background_activate(control)
             if effect:
                 return _background(target, f"{label} : {effect}.", guard, screenshot_after, settle_ms)
         if method == "uia":
             raise ComputerError(f"{label} n'offre pas d'action UI Automation pour ce clic : rien n'a été fait.")
+        if method == "post_message":
+            center = engine.element_center(control, engine.current_frame(target))
+            if center is None:
+                raise ComputerError(f"{label} n'est pas visible dans la fenêtre : rien n'a été cliqué.")
+            engine.post_message_click(target, *center, button=button, count=click_count)
+            return _done(target, f"Clic PostMessage {button} ×{click_count} sur {label} (sans vol de focus).", screenshot_after, settle_ms)
+
         _require_foreground(foreground, f"Ce clic sur {label}")
         with engine.input_target(target):
             center = engine.element_center(control, engine.current_frame(target))
@@ -204,8 +211,16 @@ def computer_click(
         raise ComputerError("Indiquez element_index, ou x et y.")
     frame = engine.action_frame(target)
     frame.check(x, y)
-    _require_foreground(foreground, "Un clic à une position")
     point = frame.to_screen(x, y)
+
+    if method == "post_message":
+        engine.post_message_click(target, *point, button=button, count=click_count)
+        return _done(target, f"Clic PostMessage {button} ×{click_count} en ({x},{y}) (sans vol de focus).", screenshot_after, settle_ms)
+
+    if method == "uia":
+        raise ComputerError("Le clic à des coordonnées (x, y) ne supporte pas la méthode UIA pure.")
+
+    _require_foreground(foreground, "Un clic à une position")
     with engine.input_target(target, point):
         engine.click_at(*point, button=button, count=click_count)
     return _done(target, f"Clic souris {button} ×{click_count} en ({x},{y}).", screenshot_after, settle_ms)
@@ -232,32 +247,44 @@ def computer_type_text(
     hwnd: int | None = None,
     element_index: int | None = None,
     clear_first: bool = False,
+    method: str = "auto",
     foreground: bool = False,
     screenshot_after: bool = False,
     settle_ms: int = 300,
 ) -> Content:
-    """Écrit du texte dans un champ [N] en arrière-plan via UI Automation : ajouté à la fin, ou remplace tout avec clear_first=True.
+    """Écrit du texte dans un champ [N] en arrière-plan via UI Automation ou PostMessage WM_CHAR.
 
-    La valeur est relue pour confirmer. Exige foreground=True (vrai clavier, fenêtre devant) si le champ n'accepte
-    pas l'écriture UI Automation, si le texte contient \\n (Entrée) ou \\t (Tab), ou sans element_index.
-    Au clavier : Unicode complet (accents, emojis) indépendamment de la disposition.
+    method :
+      - 'auto' : ValuePattern UI Automation en premier ; si indisponible et foreground=True, vrai clavier.
+      - 'uia' : ValuePattern uniquement (aucun focus clavier).
+      - 'post_message' : envoie les caractères WM_CHAR directement à la fenêtre sans voler le focus clavier.
+      - 'keyboard' : vrai clavier physique (exige foreground=True).
     """
     if len(text) > MAX_TEXT:
         raise ComputerError(f"Texte trop long ({len(text)} caractères, maximum {MAX_TEXT}) : découpez-le.")
     target = engine.resolve_target(hwnd)
+    if method not in ("auto", "uia", "post_message", "keyboard"):
+        raise ComputerError(f"method inconnue : {method!r} (auto, uia, post_message, keyboard).")
+
     if element_index is not None:
         control = engine.element(target, element_index)
-        with engine.ForegroundGuard(target) as guard:
-            written = engine.set_value(control, text, append=not clear_first)
-        if written:
-            verb = "remplacé par" if clear_first else "complété de"
-            return _background(
-                target, f"[{element_index}] {verb} {len(text)} caractères (arrière-plan, valeur relue).",
-                guard, screenshot_after, settle_ms,
-            )  # fmt: skip
-        _require_foreground(foreground, f"La saisie au clavier dans [{element_index}]")
-    else:
-        _require_foreground(foreground, "La saisie au clavier sans element_index")
+        if method not in ("keyboard", "post_message"):
+            with engine.ForegroundGuard(target) as guard:
+                written = engine.set_value(control, text, append=not clear_first)
+            if written:
+                verb = "remplacé par" if clear_first else "complété de"
+                return _background(
+                    target, f"[{element_index}] {verb} {len(text)} caractères (arrière-plan, valeur relue).",
+                    guard, screenshot_after, settle_ms,
+                )  # fmt: skip
+        if method == "uia":
+            raise ComputerError(f"[{element_index}] n'accepte pas l'écriture UI Automation : rien n'a été fait.")
+
+    if method == "post_message":
+        chars = engine.post_message_type(target, text)
+        return _done(target, f"Saisie PostMessage WM_CHAR ({chars} caractères) envoyée à {engine.describe(target)} sans vol de focus.", screenshot_after, settle_ms)
+
+    _require_foreground(foreground, f"La saisie au clavier{' dans [' + str(element_index) + ']' if element_index is not None else ' sans element_index'}")
     with engine.input_target(target):
         if element_index is not None and not engine.focus_element(control):
             raise ComputerError(
@@ -269,6 +296,21 @@ def computer_type_text(
             engine.press_combo("backspace")
         engine.type_unicode(text)
     return _done(target, f"{len(text)} caractères tapés au clavier.", screenshot_after, settle_ms)
+
+
+@tool
+def computer_launch_app(
+    command: str,
+    background: bool = True,
+    wait_ms: int = 800,
+) -> Content:
+    """Lance une application. Si background=True (défaut), la démarre sans voler le premier plan (SW_SHOWMINNOACTIVE)."""
+    res = engine.launch_app(command, background=background, wait_ms=wait_ms)
+    target = res.get("hwnd") or engine.foreground()
+    title = res.get("title") or command
+    pid = res.get("pid")
+    mode = "arrière-plan (sans vol de focus)" if background else "premier plan"
+    return f"Application lancée en {mode} : PID {pid}, {f'hwnd {target} (« {title} »)' if res.get('hwnd') else 'processus en cours'}."
 
 
 @tool

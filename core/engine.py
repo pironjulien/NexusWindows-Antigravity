@@ -13,6 +13,8 @@ import ctypes
 import io
 import math
 import os
+import subprocess
+import sys
 import threading
 import time
 from ctypes import wintypes
@@ -159,6 +161,26 @@ PeekMessageW = _proto(
 TranslateMessage = _proto(user32, "TranslateMessage", wintypes.BOOL, ctypes.POINTER(wintypes.MSG))
 DispatchMessageW = _proto(user32, "DispatchMessageW", ctypes.c_ssize_t, ctypes.POINTER(wintypes.MSG))
 PostThreadMessageW = _proto(user32, "PostThreadMessageW", wintypes.BOOL, DWORD, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+PostMessageW = _proto(user32, "PostMessageW", wintypes.BOOL, HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+SendMessageW = _proto(user32, "SendMessageW", ctypes.c_ssize_t, HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+ScreenToClient = _proto(user32, "ScreenToClient", wintypes.BOOL, HWND, ctypes.POINTER(POINT))
+
+WM_MOUSEMOVE = 0x0200
+WM_LBUTTONDOWN = 0x0201
+WM_LBUTTONUP = 0x0202
+WM_LBUTTONDBLCLK = 0x0203
+WM_RBUTTONDOWN = 0x0204
+WM_RBUTTONUP = 0x0205
+WM_MBUTTONDOWN = 0x0207
+WM_MBUTTONUP = 0x0208
+WM_CHAR = 0x0102
+WM_KEYDOWN = 0x0100
+WM_KEYUP = 0x0101
+MK_LBUTTON = 0x0001
+MK_RBUTTON = 0x0002
+MK_MBUTTON = 0x0010
+SW_HIDE = 0
+SW_SHOWMINNOACTIVE = 7
 GetCurrentThreadId = _proto(kernel32, "GetCurrentThreadId", DWORD)
 GetTickCount = _proto(kernel32, "GetTickCount", DWORD)
 OpenProcess = _proto(kernel32, "OpenProcess", HANDLE, DWORD, wintypes.BOOL, DWORD)
@@ -1486,6 +1508,124 @@ def scroll_at(x: int, y: int, direction: str, amount: int) -> None:
             time.sleep(0.02)
 
 
+def post_message_click(
+    hwnd: int,
+    screen_x: int,
+    screen_y: int,
+    button: str = "left",
+    count: int = 1,
+) -> bool:
+    """Sends mouse click messages directly to the window message queue without moving cursor or stealing focus."""
+    if not IsWindow(hwnd):
+        raise ComputerError(f"Fenêtre invalide (hwnd {hwnd}).")
+    if button not in _BUTTONS:
+        raise ComputerError(f"Bouton inconnu : {button!r} (left, right, middle).")
+
+    pt_screen = POINT(screen_x, screen_y)
+    child = WindowFromPoint(pt_screen)
+    target = child if child and IsWindow(child) and (child == hwnd or GetAncestor(child, GA_ROOT) == hwnd) else hwnd
+
+    pt_client = POINT(screen_x, screen_y)
+    ScreenToClient(target, ctypes.byref(pt_client))
+    l_param = ((pt_client.y & 0xFFFF) << 16) | (pt_client.x & 0xFFFF)
+
+    btn_map = {
+        "left": (WM_LBUTTONDOWN, WM_LBUTTONUP, MK_LBUTTON, WM_LBUTTONDBLCLK),
+        "right": (WM_RBUTTONDOWN, WM_RBUTTONUP, MK_RBUTTON, 0),
+        "middle": (WM_MBUTTONDOWN, WM_MBUTTONUP, MK_MBUTTON, 0),
+    }
+    down_msg, up_msg, mk_flag, dblclk_msg = btn_map[button]
+
+    PostMessageW(target, WM_MOUSEMOVE, 0, l_param)
+    for c in range(count):
+        if c > 0 and dblclk_msg:
+            PostMessageW(target, dblclk_msg, mk_flag, l_param)
+        else:
+            PostMessageW(target, down_msg, mk_flag, l_param)
+        time.sleep(0.02)
+        PostMessageW(target, up_msg, 0, l_param)
+        if c < count - 1:
+            time.sleep(0.02)
+    return True
+
+
+def post_message_type(
+    hwnd: int,
+    text: str,
+    target_control_hwnd: int | None = None,
+) -> int:
+    """Sends Unicode characters directly to the window message queue via WM_CHAR without focus steal."""
+    target = target_control_hwnd or hwnd
+    if not IsWindow(target):
+        raise ComputerError(f"Fenêtre invalide (hwnd {target}).")
+    chars_sent = 0
+    for char in text:
+        if char == "\r":
+            continue
+        if char == "\n":
+            PostMessageW(target, WM_KEYDOWN, VK_RETURN, 0)
+            PostMessageW(target, WM_CHAR, 0x0D, 0)
+            PostMessageW(target, WM_KEYUP, VK_RETURN, 0)
+        elif char == "\t":
+            PostMessageW(target, WM_KEYDOWN, VK_TAB, 0)
+            PostMessageW(target, WM_CHAR, 0x09, 0)
+            PostMessageW(target, WM_KEYUP, VK_TAB, 0)
+        else:
+            code = ord(char)
+            PostMessageW(target, WM_CHAR, code, 0)
+        chars_sent += 1
+        time.sleep(0.005)
+    return chars_sent
+
+
+def launch_app(
+    command: str,
+    background: bool = True,
+    wait_ms: int = 500,
+) -> dict[str, Any]:
+    """Launches an application process.
+
+    If background=True, starts with SW_SHOWMINNOACTIVE so it does NOT steal
+    user foreground focus. Returns pid, detected hwnd, and window title.
+    """
+    startupinfo = None
+    if sys.platform == "win32":
+        startupinfo = subprocess.STARTUPINFO()
+        if background:
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = SW_SHOWMINNOACTIVE
+
+    proc = subprocess.Popen(
+        command,
+        startupinfo=startupinfo,
+        shell=True,
+    )
+
+    if wait_ms > 0:
+        time.sleep(wait_ms / 1000.0)
+
+    detected_hwnd = None
+    detected_title = ""
+    try:
+        windows = list_windows(visible_only=False)
+        for win in windows:
+            if win["pid"] == proc.pid:
+                detected_hwnd = win["hwnd"]
+                detected_title = win["title"]
+                break
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "pid": proc.pid,
+        "hwnd": detected_hwnd,
+        "title": detected_title,
+        "background": background,
+        "command": command,
+    }
+
+
 def drag(
     start: tuple[int, int] | int,
     end: tuple[int, int] | int | None = None,
@@ -2024,18 +2164,37 @@ def click(
     button: str = "left",
     click_count: int = 1,
     foreground: bool = False,
+    method: str = "auto",
 ) -> dict[str, Any]:
-    """Clicks on an element [#N] (in background via UI Automation) or at (x, y) coordinates."""
+    """Clicks on an element [#N] (in background via UI Automation or PostMessage) or at (x, y) coordinates."""
+    if method not in ("auto", "uia", "post_message", "mouse"):
+        raise ComputerError(f"method inconnue : {method!r} (auto, uia, post_message, mouse).")
     target_hwnd = _legacy_target(hwnd)
+
     ctrl = None
     if element_index is not None:
         ctrl = _cached_element(target_hwnd, element_index)
-        if button == "left" and click_count == 1:
+        if method not in ("mouse", "post_message") and button == "left" and click_count == 1:
             effect = background_activate(ctrl)
             if effect:
                 return {"success": True, "method": "uia_pattern", "effect": effect, "element_index": element_index}
+        if method == "uia":
+            raise ComputerError(f"L'élément [{element_index}] n'offre pas d'action UI Automation pour ce clic.")
     elif x is None or y is None:
         raise ComputerError("Spécifiez soit element_index soit (x, y).")
+
+    if method == "post_message":
+        click_x, click_y = _control_center(ctrl) if ctrl is not None else _window_point(target_hwnd, x, y)
+        post_message_click(target_hwnd, click_x, click_y, button=button, count=click_count)
+        return {
+            "success": True,
+            "method": "post_message",
+            "x": click_x,
+            "y": click_y,
+            "button": button,
+            "count": click_count,
+            "element_index": element_index,
+        }
 
     with input_target(target_hwnd, activate=foreground, action="Le clic physique à la souris"):
         # Measured once the target is in front: activation may restore or move it.
@@ -2089,19 +2248,35 @@ def type_text(
     element_index: int | None = None,
     clear_first: bool = False,
     foreground: bool = False,
+    method: str = "auto",
 ) -> dict[str, Any]:
-    """Types text into an element [#N] in background via ValuePattern without stealing focus."""
+    """Types text into an element [#N] via ValuePattern or PostMessage WM_CHAR without stealing focus."""
+    if method not in ("auto", "uia", "post_message", "keyboard"):
+        raise ComputerError(f"method inconnue : {method!r} (auto, uia, post_message, keyboard).")
     target_hwnd = _legacy_target(hwnd)
+
     ctrl = None
     if element_index is not None:
         ctrl = _cached_element(target_hwnd, element_index)
-        if set_value(ctrl, text, append=not clear_first):
-            return {
-                "success": True,
-                "method": "uia_value_pattern",
-                "element_index": element_index,
-                "length": len(text),
-            }
+        if method not in ("keyboard", "post_message"):
+            if set_value(ctrl, text, append=not clear_first):
+                return {
+                    "success": True,
+                    "method": "uia_value_pattern",
+                    "element_index": element_index,
+                    "length": len(text),
+                }
+        if method == "uia":
+            raise ComputerError(f"L'élément [{element_index}] ne supporte pas ValuePattern.")
+
+    if method == "post_message":
+        chars = post_message_type(target_hwnd, text)
+        return {
+            "success": True,
+            "method": "post_message_char",
+            "element_index": element_index,
+            "length": chars,
+        }
 
     with input_target(target_hwnd, activate=foreground, action="La saisie clavier physique"):
         if ctrl is not None and not focus_element(ctrl):

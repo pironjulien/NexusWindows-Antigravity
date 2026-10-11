@@ -94,8 +94,9 @@ def computer_click(
     button: str = "left",
     click_count: int = 1,
     foreground: bool = False,
+    method: str = "auto",
 ) -> str:
-    """Clique sur un élément [#N] (en arrière-plan via UI Automation) ou sur (x, y)."""
+    """Clique sur un élément [#N] (en arrière-plan via UI Automation ou PostMessage) ou sur (x, y)."""
     return _format_result(
         engine.click,
         hwnd=hwnd,
@@ -105,6 +106,7 @@ def computer_click(
         button=button,
         click_count=click_count,
         foreground=foreground,
+        method=method,
     )
 
 
@@ -138,8 +140,9 @@ def computer_type_text(
     element_index: int | None = None,
     clear_first: bool = False,
     foreground: bool = False,
+    method: str = "auto",
 ) -> str:
-    """Saisit du texte dans un élément [#N] en arrière-plan via UI Automation ValuePattern sans voler le focus."""
+    """Saisit du texte dans un élément [#N] en arrière-plan via UI Automation ValuePattern ou PostMessage WM_CHAR."""
     return _format_result(
         engine.type_text,
         text=text,
@@ -147,7 +150,18 @@ def computer_type_text(
         element_index=element_index,
         clear_first=clear_first,
         foreground=foreground,
+        method=method,
     )
+
+
+@tool
+def computer_launch_app(
+    command: str,
+    background: bool = True,
+    wait_ms: int = 800,
+) -> str:
+    """Lance une application. Si background=True (défaut), la démarre sans voler le premier plan (SW_SHOWMINNOACTIVE)."""
+    return _format_result(engine.launch_app, command=command, background=background, wait_ms=wait_ms)
 
 
 @tool

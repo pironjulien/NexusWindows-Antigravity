@@ -201,8 +201,8 @@ def computer_click(
 ) -> Content:
     """Clicks an element [N] in background via UI Automation, or clicks at (x, y) coordinates."""
     target = engine.resolve_target(hwnd)
-    if method not in ("auto", "uia", "mouse"):
-        raise ComputerError(f"Unknown method: {method!r} (expected auto, uia, or mouse).")
+    if method not in ("auto", "uia", "post_message", "mouse"):
+        raise ComputerError(f"Unknown method: {method!r} (expected auto, uia, post_message, or mouse).")
     simple = button == "left" and click_count == 1
     if element_index is not None:
         if target != engine.SESSION.elements_hwnd or element_index not in engine.SESSION.elements:
@@ -218,13 +218,20 @@ def computer_click(
                 "Call computer_get_window_state to refresh element IDs."
             ) from None
         label = f"[{element_index}] {engine._quoted(control.Name, 60)}"
-        if method != "mouse" and simple:
+        if method not in ("mouse", "post_message") and simple:
             with engine.ForegroundGuard(target) as guard:
                 effect = engine.background_activate(control)
             if effect:
                 return _background(target, f"{label}: {effect}.", guard, screenshot_after, settle_ms)
         if method == "uia":
-            raise ComputerError(f"{label} does not support UI Automation click. Try mouse click with foreground=True.")
+            raise ComputerError(f"{label} does not support UI Automation click. Try post_message or mouse with foreground=True.")
+        if method == "post_message":
+            center = engine.element_center(control, engine.current_frame(target))
+            if center is None:
+                raise ComputerError(f"{label} is not currently visible in window.")
+            engine.post_message_click(target, *center, button=button, count=click_count)
+            return _done(target, f"PostMessage click {button} x{click_count} on {label} (silent, no focus steal).", screenshot_after, settle_ms)
+
         _require_foreground(foreground, f"Click on {label}")
         with engine.input_target(target):
             center = engine.element_center(control, engine.current_frame(target))
@@ -238,8 +245,16 @@ def computer_click(
         raise ComputerError("Specify either element_index or both x and y.")
     frame = engine.action_frame(target)
     frame.check(x, y)
-    _require_foreground(foreground, "Click at coordinates")
     point = frame.to_screen(x, y)
+
+    if method == "post_message":
+        engine.post_message_click(target, *point, button=button, count=click_count)
+        return _done(target, f"PostMessage click {button} x{click_count} at ({x},{y}) (silent, no focus steal).", screenshot_after, settle_ms)
+
+    if method == "uia":
+        raise ComputerError("Coordinate click (x, y) does not support UIA method. Use auto, post_message, or mouse.")
+
+    _require_foreground(foreground, "Click at coordinates")
     with engine.input_target(target, point):
         engine.click_at(*point, button=button, count=click_count)
     return _done(target, f"Physical click {button} x{click_count} at ({x},{y}).", screenshot_after, settle_ms)
@@ -271,14 +286,18 @@ def computer_type_text(
     hwnd: int | None = None,
     element_index: int | None = None,
     clear_first: bool = False,
+    method: str = "auto",
     foreground: bool = False,
     screenshot_after: bool = False,
     settle_ms: int = 300,
 ) -> Content:
-    """Types text into an element [N] via UI Automation ValuePattern in background."""
+    """Types text into an element [N] via UI Automation ValuePattern or PostMessage WM_CHAR in background."""
     if len(text) > MAX_TEXT:
         raise ComputerError(f"Text too long ({len(text)} chars, maximum {MAX_TEXT}). Split into smaller batches.")
     target = engine.resolve_target(hwnd)
+    if method not in ("auto", "uia", "post_message", "keyboard"):
+        raise ComputerError(f"Unknown method: {method!r} (expected auto, uia, post_message, or keyboard).")
+
     if element_index is not None:
         if target != engine.SESSION.elements_hwnd or element_index not in engine.SESSION.elements:
             raise ComputerError(
@@ -292,20 +311,26 @@ def computer_type_text(
                 f"STALE_ELEMENT: Element [{element_index}] is stale or inaccessible in target window. "
                 "Call computer_get_window_state to refresh element IDs."
             ) from None
-        with engine.ForegroundGuard(target) as guard:
-            written = engine.set_value(control, text, append=not clear_first)
-        if written:
-            verb = "replaced with" if clear_first else "appended"
-            return _background(
-                target,
-                f"[{element_index}] {verb} {len(text)} chars (background UIA).",
-                guard,
-                screenshot_after,
-                settle_ms,
-            )
-        _require_foreground(foreground, f"Keyboard input into [{element_index}]")
-    else:
-        _require_foreground(foreground, "Keyboard input without element_index")
+        if method not in ("keyboard", "post_message"):
+            with engine.ForegroundGuard(target) as guard:
+                written = engine.set_value(control, text, append=not clear_first)
+            if written:
+                verb = "replaced with" if clear_first else "appended"
+                return _background(
+                    target,
+                    f"[{element_index}] {verb} {len(text)} chars (background UIA).",
+                    guard,
+                    screenshot_after,
+                    settle_ms,
+                )
+        if method == "uia":
+            raise ComputerError(f"[{element_index}] does not accept UI Automation typing.")
+
+    if method == "post_message":
+        chars = engine.post_message_type(target, text)
+        return _done(target, f"Typed {chars} characters via PostMessage WM_CHAR into {engine.describe(target)} without focus steal.", screenshot_after, settle_ms)
+
+    _require_foreground(foreground, f"Keyboard input{' into [' + str(element_index) + ']' if element_index is not None else ' without element_index'}")
     with engine.input_target(target):
         if element_index is not None and not engine.focus_element(control):
             raise ComputerError(f"[{element_index}] could not receive keyboard focus. Re-inspect window state.")
@@ -314,6 +339,21 @@ def computer_type_text(
             engine.press_combo("backspace")
         engine.type_unicode(text)
     return _done(target, f"Typed {len(text)} characters via keyboard.", screenshot_after, settle_ms)
+
+
+@tool
+def computer_launch_app(
+    command: str,
+    background: bool = True,
+    wait_ms: int = 800,
+) -> Content:
+    """Launches an application or command. If background=True (default), starts with SW_SHOWMINNOACTIVE without stealing user foreground focus."""
+    res = engine.launch_app(command, background=background, wait_ms=wait_ms)
+    target = res.get("hwnd") or engine.foreground()
+    title = res.get("title") or command
+    pid = res.get("pid")
+    mode = "background (no focus steal)" if background else "foreground"
+    return f"Application launched in {mode}: PID {pid}, {f'hwnd {target} (« {title} »)' if res.get('hwnd') else 'active process'}."
 
 
 @tool

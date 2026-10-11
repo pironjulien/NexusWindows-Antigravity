@@ -4,6 +4,19 @@ Toutes les modifications notables apportées au projet **Antigravity Computer Us
 
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/), et ce projet adhère au versioning sémantique.
 
+## [2.4.0] - 2026-10-11
+
+### Ajouté
+- **Contrôle Furtif Win32 par Messages Directs (`PostMessageW`)** :
+  - `post_message_click(hwnd, x, y, button, count)` : injection de clics souris (`WM_LBUTTONDOWN`, `WM_LBUTTONUP`, `WM_LBUTTONDBLCLK`, `WM_RBUTTON*`, `WM_MBUTTON*`) directement dans la file de messages du HWND cible (avec résolution de sous-contrôle via `WindowFromPoint` et conversion client `ScreenToClient`). Zéro déplacement du curseur physique, zéro vol de focus.
+  - `post_message_type(hwnd, text)` : saisie de caractères Unicode en tâche de fond directe via `WM_CHAR` et `VK_RETURN`/`VK_TAB` sans nécessiter le focus clavier système.
+  - Option `method='post_message'` intégrée dans `click` et `type_text` à travers tous les serveurs et adaptateurs (`server.py`, `adapters/claude`, `adapters/codex`, `adapters/antigravity`).
+- **Lancement d'Applications en Arrière-Plan (`SW_SHOWMINNOACTIVE`)** :
+  - Nouvelle fonction `launch_app(command, background=True, wait_ms=500)` et outil MCP `@tool computer_launch_app` : démarre une application ou processus sans voler le premier plan de l'utilisateur grâce au flag Win32 `SW_SHOWMINNOACTIVE` (7) ou `SW_HIDE` (0), et détecte automatiquement le `hwnd` et `title` du processus créé.
+
+### Tests
+- Suite étendue à 95 tests unitaires 100 % passants (89 auparavant), couvrant l'injection par messages, le lparam packing, la validation de `method`, et le lancement d'applications sans focus.
+
 ## [2.3.4] - 2026-10-10
 
 ### Corrigé

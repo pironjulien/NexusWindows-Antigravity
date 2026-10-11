@@ -605,3 +605,94 @@ def test_drag_tuple_signature_checks_its_window(monkeypatch, fake_desktop):
     with pytest.raises(ComputerError, match="introuvable"):
         engine.drag(start=(10, 20), end=(50, 60), hwnd=777)
     assert fake_desktop["sent"] == []
+
+
+def test_post_message_click_mocked(monkeypatch):
+    posted = []
+    monkeypatch.setattr(engine, "IsWindow", lambda h: True)
+    monkeypatch.setattr(engine, "WindowFromPoint", lambda pt: 12345)
+    monkeypatch.setattr(engine, "ScreenToClient", lambda hwnd, pt_ptr: True)
+    monkeypatch.setattr(engine, "PostMessageW", lambda h, msg, wparam, lparam: posted.append((h, msg, wparam, lparam)))
+    monkeypatch.setattr(engine.time, "sleep", lambda s: None)
+
+    res = engine.post_message_click(12345, 150, 80, button="left", count=1)
+    assert res is True
+    expected_lparam = (80 << 16) | 150
+    assert (12345, engine.WM_MOUSEMOVE, 0, expected_lparam) in posted
+    assert (12345, engine.WM_LBUTTONDOWN, engine.MK_LBUTTON, expected_lparam) in posted
+    assert (12345, engine.WM_LBUTTONUP, 0, expected_lparam) in posted
+
+
+def test_post_message_type_mocked(monkeypatch):
+    chars_posted = []
+    monkeypatch.setattr(engine, "IsWindow", lambda h: True)
+    monkeypatch.setattr(
+        engine, "PostMessageW", lambda h, msg, wparam, lparam: chars_posted.append((h, msg, wparam, lparam))
+    )
+    monkeypatch.setattr(engine.time, "sleep", lambda s: None)
+
+    count = engine.post_message_type(12345, "A\nB")
+    assert count == 3
+    assert (12345, engine.WM_CHAR, 65, 0) in chars_posted
+    assert (12345, engine.WM_KEYDOWN, engine.VK_RETURN, 0) in chars_posted
+    assert (12345, engine.WM_CHAR, 0x0D, 0) in chars_posted
+    assert (12345, engine.WM_CHAR, 66, 0) in chars_posted
+
+
+def test_launch_app_background_uses_sw_showminnoactive(monkeypatch):
+    captured = {}
+
+    class FakeProc:
+        pid = 4242
+
+    def mock_popen(cmd, startupinfo=None, shell=False):
+        captured["cmd"] = cmd
+        captured["startupinfo"] = startupinfo
+        return FakeProc()
+
+    monkeypatch.setattr(engine.subprocess, "Popen", mock_popen)
+    monkeypatch.setattr(
+        engine, "list_windows", lambda visible_only: [{"pid": 4242, "hwnd": 9876, "title": "Background App"}]
+    )
+    monkeypatch.setattr(engine.time, "sleep", lambda s: None)
+
+    res = engine.launch_app("notepad.exe", background=True, wait_ms=10)
+    assert res["success"] is True
+    assert res["pid"] == 4242
+    assert res["hwnd"] == 9876
+    assert res["title"] == "Background App"
+    assert res["background"] is True
+    assert captured["startupinfo"].wShowWindow == engine.SW_SHOWMINNOACTIVE
+
+
+def test_click_method_post_message(monkeypatch):
+    calls = []
+    monkeypatch.setattr(engine, "IsWindow", lambda h: True)
+    monkeypatch.setattr(engine, "get_window_rect", lambda h: {"left": 0, "top": 0, "width": 800, "height": 600})
+    monkeypatch.setattr(
+        engine, "post_message_click", lambda hwnd, x, y, button, count: calls.append((hwnd, x, y, button, count))
+    )
+
+    res = engine.click(hwnd=12345, x=50, y=60, method="post_message")
+    assert res["success"] is True
+    assert res["method"] == "post_message"
+    assert calls == [(12345, 50, 60, "left", 1)]
+
+
+def test_type_text_method_post_message(monkeypatch):
+    calls = []
+    monkeypatch.setattr(engine, "IsWindow", lambda h: True)
+    monkeypatch.setattr(engine, "post_message_type", lambda hwnd, text: calls.append((hwnd, text)) or len(text))
+
+    res = engine.type_text("Hello", hwnd=12345, method="post_message")
+    assert res["success"] is True
+    assert res["method"] == "post_message_char"
+    assert res["length"] == 5
+    assert calls == [(12345, "Hello")]
+
+
+def test_click_and_type_reject_unknown_methods():
+    with pytest.raises(ComputerError, match="method inconnue"):
+        engine.click(hwnd=12345, x=10, y=10, method="telepathy")
+    with pytest.raises(ComputerError, match="method inconnue"):
+        engine.type_text("test", hwnd=12345, method="quantum")
