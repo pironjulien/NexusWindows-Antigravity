@@ -563,7 +563,7 @@ def test_input_target_never_activates_without_permission(monkeypatch, fake_deskt
             pytest.fail("input sent to a window that is not in front")
 
 
-@pytest.mark.parametrize("name", ["server.py", "adapters/claude/server.py", "adapters/codex/server.py"])
+@pytest.mark.parametrize("name", ["server.py"])
 def test_adapters_send_physical_input_only_inside_input_target(name):
     source = (Path(__file__).resolve().parents[1] / name).read_text(encoding="utf-8")
     assert "ensure_input_target" not in source  # Activation outside the transaction reopens the race.

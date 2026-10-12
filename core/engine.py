@@ -1,4 +1,4 @@
-"""Windows desktop engine for Claude: window-scoped capture, UI Automation and SendInput.
+"""Windows desktop engine for Google Antigravity: window-scoped capture, UI Automation 3.0 and SendInput.
 
 Every coordinate exchanged with the model is a pixel of the image returned for the current
 target (a window's visible frame, or the whole virtual screen). The engine converts those

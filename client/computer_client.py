@@ -2,7 +2,7 @@
 """
 NexusAGY Computer Engine - OS-Level Windows Desktop & Application Automation.
 Provides SOTA window-scoped control, UI Automation tree extraction, and SendInput interaction.
-Parity & superiority over Claude and Codex Computer Use.
+SOTA Windows OS Computer Use Engine for Google Antigravity & Gemini.
 """
 
 from __future__ import annotations

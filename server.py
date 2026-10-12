@@ -1,4 +1,4 @@
-"""nexus-computer for Claude Code: the Windows desktop as MCP tools, background first.
+"""antigravity-computer-use: SOTA Windows OS Computer Use & Spotlight Companion for Google Antigravity.
 
 Coordinates are pixels of the last image returned for the target; engine.py maps them to the screen.
 """
@@ -19,11 +19,11 @@ from mcp.server.stdio import stdio_server
 import engine
 from engine import SCREEN, ComputerError
 
-INSTRUCTIONS = """Windows : UI Automation en arrière-plan. Dans Codex, web : navigateur intégré et ses API (filechooser pour téléverser).
-Lire computer_get_window_state avant d'utiliser [N], puis vérifier l'effet.
-Souris/clavier réels : foreground=True seulement si l'action est autorisée par Julien."""
+INSTRUCTIONS = """Windows : UI Automation 3.0 en arrière-plan pour Google Antigravity et modèles Gemini.
+Lire computer_get_window_state avant d'utiliser [N] ou les coordonnées Gemini box_2d, puis vérifier l'effet.
+Souris/clavier réels : foreground=True seulement si l'action est autorisée par l'utilisateur."""
 
-mcp = FastMCP("nexus-computer", instructions=INSTRUCTIONS, log_level="WARNING")
+mcp = FastMCP("antigravity-computer-use", instructions=INSTRUCTIONS, log_level="WARNING")
 tool = mcp.tool(structured_output=False)
 
 Content = str | list[Any]
@@ -428,22 +428,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument(
         "--adapter",
-        choices=["claude", "codex", "antigravity", "universal"],
-        default="universal",
+        choices=["antigravity", "universal"],
+        default="antigravity",
     )
     args, _ = parser.parse_known_args()
 
-    if args.adapter == "claude":
-        from adapters.claude.server import main as claude_main
-
-        claude_main()
-        return
-    elif args.adapter == "codex":
-        from adapters.codex.server import main as codex_main
-
-        codex_main()
-        return
-    elif args.adapter == "antigravity":
+    if args.adapter == "antigravity":
         from adapters.antigravity.server import main as antigravity_main
 
         antigravity_main()
