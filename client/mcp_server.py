@@ -458,20 +458,29 @@ def computer_focus_window(
 
 
 @_register_computer_tool
+def computer_close_window(hwnd: int) -> str:
+    """Ferme proprement la fenêtre cible via UI Automation WindowPattern.Close() avec repli automatique sur Win32 WM_CLOSE.
+    Permet de fermer les applications Win32, WPF ainsi que les fenêtres UWP/Store modernes (Calculatrice, Paramètres, etc.).
+    """
+    return _format_computer_result(computer_client.close_window, hwnd=hwnd)
+
+
+@_register_computer_tool
 def computer_get_window_state(
     hwnd: int | None = None,
-    max_elements: int = 50,
+    max_elements: int = 80,
     capture_screenshot: bool = False,
     output_path: str | None = None,
     max_depth: int = 30,
     annotate_screenshot: bool = False,
+    query: str | None = None,
 ) -> str:
     """Extrait l'état complet de la fenêtre ciblée (ou fenêtre active) :
     - Arbre UI Automation compact avec marqueurs Set-of-Marks [#1], [#2]...
     - Type de contrôle, libellé textuel, valeur actuelle, centre relatif et coordonnées spatiales Gemini box_2d [ymin, xmin, ymax, xmax] (0-1000).
     - Capture WebP haute résolution compressée sous 200 Ko (Règle Anti-Crash 400 garantie) si capture_screenshot=True ou output_path fourni.
+    - query: Filtre optionnel pour cibler directement un élément par mot-clé (ex: query='prompt', query='search', query='submit').
     - annotate_screenshot=True : superpose visuellement les bounding boxes et badges [#N] directement sur l'image WebP.
-    - Profondeur max d'exploration UIA (max_depth=30 par défaut avec budget temps 1.618s et élagage spatial).
     """
     return _format_computer_result(
         computer_client.get_window_state,
@@ -481,6 +490,7 @@ def computer_get_window_state(
         output_path=output_path,
         max_depth=max_depth,
         annotate_screenshot=annotate_screenshot,
+        query=query,
     )
 
 
@@ -490,12 +500,16 @@ def computer_click(
     element_index: int | None = None,
     x: int | None = None,
     y: int | None = None,
+    box_2d: list[int] | None = None,
     button: str = "left",
     click_count: int = 1,
-    foreground: bool = False,
+    foreground: bool = True,
+    restore_focus: bool = False,
 ) -> str:
-    """Clique sur un élément de l'interface par son index [#N] (en arrière-plan via UI Automation pour boutons, cases à cocher, onglets, menus) ou sur des coordonnées relatives (x, y).
-    Supporte 'left', 'right', 'middle' et double-clic (click_count=2). Les actions physiques avec la souris exigent foreground=True.
+    """Clique sur un élément de l'interface par son index [#N], ses coordonnées spatiales Gemini box_2d [ymin, xmin, ymax, xmax] (0-1000), ou coordonnées relatives (x, y).
+    - Boutons / onglets UIA standards : exécutés en arrière-plan sans vol de focus ni mouvement de souris.
+    - Applications Electron / Web ou coordonnées : clic physique rapide.
+    - restore_focus=True : restaure instantanément la fenêtre active et la position du curseur de Julien pour ne jamais interrompre son travail.
     """
     return _format_computer_result(
         computer_client.click,
@@ -503,9 +517,11 @@ def computer_click(
         element_index=element_index,
         x=x,
         y=y,
+        box_2d=box_2d,
         button=button,
         click_count=click_count,
         foreground=foreground,
+        restore_focus=restore_focus,
     )
 
 
@@ -517,10 +533,10 @@ def computer_mouse_move(
     smooth: bool = True,
     steps: int = 10,
     duration_ms: int = 200,
-    foreground: bool = False,
+    foreground: bool = True,
 ) -> str:
     """Déplace le curseur de la souris vers des coordonnées (x, y) relatives à la fenêtre ou absolues à l'écran.
-    Supporte le déplacement fluide ease-in-out (smooth=True). Exige foreground=True pour confirmer le pilotage physique du curseur.
+    Supporte le déplacement fluide ease-in-out (smooth=True).
     """
     return _format_computer_result(
         computer_client.mouse_move,
@@ -539,30 +555,59 @@ def computer_type_text(
     text: str,
     hwnd: int | None = None,
     element_index: int | None = None,
+    x: int | None = None,
+    y: int | None = None,
+    box_2d: list[int] | None = None,
     clear_first: bool = False,
-    foreground: bool = False,
+    submit: bool = False,
+    method: str = "auto",
+    foreground: bool = True,
+    restore_clipboard: bool = True,
+    restore_focus: bool = False,
 ) -> str:
-    """Saisit du texte dans la fenêtre ou l'élément ciblé.
-    Si element_index est fourni, remplace la valeur directement en arrière-plan via UI Automation ValuePattern sans voler le focus ni toucher au clavier.
-    La saisie matérielle au clavier SendInput exige foreground=True.
+    """Saisit du texte ultra-rapidement sans jamais couper les prompts ni perturber Julien.
+    - method='auto' (défaut) / 'paste' : collage atomique via le presse-papier Windows (Ctrl+V) en < 30 ms.
+      Insensible aux newlines (aucun appui prématuré sur Entrée au milieu du prompt !).
+      Préserve et restaure automatiquement le contenu personnel du presse-papier de Julien (restore_clipboard=True).
+    - box_2d : Coordonnées Gemini [ymin, xmin, ymax, xmax] (0-1000) pour cliquer et coller directement au centre du champ.
+    - submit=True : Envoie la touche Entrée après insertion pour valider/envoyer le prompt en 1 seule action.
+    - restore_focus=True : Restaure instantanément la fenêtre où Julien est en train de travailler pour un fonctionnement furtif.
     """
     return _format_computer_result(
         computer_client.type_text,
         text=text,
         hwnd=hwnd,
         element_index=element_index,
+        x=x,
+        y=y,
+        box_2d=box_2d,
         clear_first=clear_first,
+        submit=submit,
+        method=method,
         foreground=foreground,
+        restore_clipboard=restore_clipboard,
+        restore_focus=restore_focus,
     )
 
 
 @_register_computer_tool
-def computer_press_key(keys: str, hwnd: int | None = None, foreground: bool = False) -> str:
+def computer_press_key(
+    keys: str,
+    hwnd: int | None = None,
+    foreground: bool = True,
+    restore_focus: bool = False,
+) -> str:
     """Presse une touche ou une combinaison de touches système (raccourcis clavier).
     Exemples : 'enter', 'tab', 'escape', 'backspace', 'ctrl+c', 'ctrl+v', 'alt+tab', 'alt+f4', 'win+r', 'ctrl+shift+p'.
-    Exige foreground=True pour confirmer la frappe matérielle sur la fenêtre cible.
+    restore_focus=True : restaure instantanément la fenêtre active de Julien.
     """
-    return _format_computer_result(computer_client.press_key, keys=keys, hwnd=hwnd, foreground=foreground)
+    return _format_computer_result(
+        computer_client.press_key,
+        keys=keys,
+        hwnd=hwnd,
+        foreground=foreground,
+        restore_focus=restore_focus,
+    )
 
 
 @_register_computer_tool

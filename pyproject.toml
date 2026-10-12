@@ -1,6 +1,6 @@
 [project]
 name = "antigravity-computer-use"
-version = "2.4.3"
+version = "2.5.0"
 description = "SOTA Windows OS Computer Use & Spotlight Companion for Google Antigravity"
 requires-python = ">=3.10"
 dependencies = [

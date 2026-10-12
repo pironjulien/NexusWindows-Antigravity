@@ -4,6 +4,19 @@ Toutes les modifications notables apportées au projet **Antigravity Computer Us
 
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/), et ce projet adhère au versioning sémantique.
 
+## [2.5.0] - 2026-10-12
+
+### Ajouté
+- **`computer_close_window` Déterministe** : Fermeture propre de fenêtres cibles avec négociation en deux passes (pattern natif UI Automation `WindowPattern.Close()` puis repli Win32 `WM_CLOSE`).
+- **Grounding Gemini `box_2d` Standardisé** : Intégration systématique des boîtes englobantes normalisées `[ymin, xmin, ymax, xmax]` (échelle 0-1000) dans chaque élément interactif pour modèles multimodaux Gemini 2.5.
+- **`computer_logger` & Audit Trail Structuré** : Journalisation JSON Lines et métriques temps réel sur toutes les commandes OS exécutées.
+
+### Corrigé
+- **Éradication des Risques de Faux Succès & Conflits Presse-Papiers** :
+  - Restauration déterministe du presse-papiers avec boucle de détection d'écrasement concurrent.
+  - Garde anti-pollution stricte inter-fenêtres (`get_cached_element_rejects_cross_window_controls`).
+  - Protection des fenêtres système critiques (`Progman`, `Shell_TrayWnd`).
+
 ## [2.4.3] - 2026-10-11
 
 ### Corrigé
