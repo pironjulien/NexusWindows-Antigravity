@@ -47,21 +47,21 @@ Conventional OS automation frameworks rely on full-screen screenshots, coarse pi
 
 ```mermaid
 flowchart TD
-    AGY["Google Antigravity\n(CLI agy / Antigravity IDE)"] -->|Model Context Protocol (FastMCP)| MCPServer["Antigravity MCP Server\n(client/mcp_server.py)"]
+    AGY["Google Antigravity<br/>(CLI agy / Antigravity IDE)"] -->|"Model Context Protocol (FastMCP)"| MCPServer["Antigravity MCP Server<br/>(client/mcp_server.py)"]
     
-    subgraph EngineCore ["Windows Core Engine (client/computer_client.py)"]
+    subgraph EngineCore ["Windows Core Engine"]
         Router{"Execution Strategy"}
         
-        Router -->|Click / Toggle / Select| UIA_Action["COM UI Automation 3.0 Patterns\n(TogglePattern / ValuePattern / InvokePattern / WindowPattern)"]
-        Router -->|State Inspection & Grounding| UIA_Tree["Recursive UIA Tree Traversal\n(Set-of-Marks [#1..#N] & Gemini box_2d)"]
-        Router -->|Safe Screen Capture| GDI["Win32 Offscreen GDI Buffer\nPrintWindow(PW_RENDERFULLCONTENT)"]
-        Router -->|Hardware Action Required| FocusGuard["ForegroundGuard (10-50ms WinEventHook)\n+ Immediate Z-Order Restoration"]
+        Router -->|"Click / Toggle / Select"| UIA_Action["COM UI Automation 3.0 Patterns<br/>(Toggle / Value / Invoke / Window)"]
+        Router -->|"State Inspection & Grounding"| UIA_Tree["Recursive UIA Tree Traversal<br/>Set-of-Marks and Gemini box_2d"]
+        Router -->|"Safe Screen Capture"| GDI["Win32 Offscreen GDI Buffer<br/>PrintWindow PW_RENDERFULLCONTENT"]
+        Router -->|"Hardware Action Required"| FocusGuard["ForegroundGuard (10-50ms WinEventHook)<br/>Immediate Z-Order Restoration"]
     end
     
     MCPServer --> EngineCore
     
-    UIA_Action -->|Direct COM Dispatch| TargetApp["Target Windows Application\n(VS Code, Chrome, Terminal, Office, Win32/WPF/WinUI)"]
-    GDI -->|Direct Memory Copy| TargetApp
+    UIA_Action --> TargetApp["Target Windows Application<br/>(VS Code, Chrome, Terminal, Office, Win32/WPF/WinUI)"]
+    GDI --> TargetApp
     
     style EngineCore fill:#161b22,stroke:#4285f4,stroke-width:2px
     style TargetApp fill:#0d1117,stroke:#34a853,stroke-width:2px
