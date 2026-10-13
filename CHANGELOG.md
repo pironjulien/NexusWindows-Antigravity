@@ -4,6 +4,11 @@ Toutes les modifications notables apportées au projet **Antigravity Computer Us
 
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/), et ce projet adhère au versioning sémantique.
 
+## [Unreleased] - 2026-10-14
+
+### Security
+- Pillow 11.3 → 12.3 (constraint `>=12.3,<13`): fixes 32 Dependabot alerts. 109 tests passing.
+
 ## [2.5.0] - 2026-10-12
 
 ### Ajouté
