@@ -4,11 +4,11 @@ version = "2.8.2"
 description = "Computer Use Windows pour Google Antigravity (le pont Chrome vit dans NexusBrowser)"
 requires-python = ">=3.10"
 dependencies = [
-    "comtypes>=1.4.17,<2",
+    "comtypes>=1.4.17,<2; sys_platform == 'win32'",
     "mcp>=2.3.0,<3",
     "mss>=9.0,<11",
     "pillow>=12.3,<13",
-    "uiautomation>=2.0,<3",
+    "uiautomation>=2.0,<3; sys_platform == 'win32'",
 ]
 
 [dependency-groups]

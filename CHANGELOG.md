@@ -7,6 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 This is the public changelog of NexusWindows for Antigravity: it lists the changes that matter to someone using the
 MCP server. Versions up to 2.5.0 were published here under the name "Antigravity Computer Use"; see the git history.
 
+## [Unreleased]
+
+### Added
+
+- Every MCP tool has a readable `title` in its annotations, next to its four hints.
+- The server starts and lists its tools outside Windows (as MCP directories such as Glama check it, in a Linux
+  container); there, each tool call answers that Windows is required. Windows-only dependencies (`comtypes`,
+  `uiautomation`) are installed on Windows only.
+- GitHub Actions: `test.ps1` on Windows and the startup test on Linux, with a Tests badge; `glama.json`.
+- README: Privacy section.
+
 ## [2.8.2] - 2026-10-18
 
 ### Changed

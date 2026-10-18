@@ -1,6 +1,7 @@
 # NexusWindows for Antigravity
 
 [![Release](https://img.shields.io/github/v/release/pironjulien/antigravity-windows-computer-use)](https://github.com/pironjulien/antigravity-windows-computer-use/releases)
+[![Tests](https://github.com/pironjulien/antigravity-windows-computer-use/actions/workflows/tests.yml/badge.svg)](https://github.com/pironjulien/antigravity-windows-computer-use/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white)](pyproject.toml)
 [![MCP](https://img.shields.io/badge/MCP-server-7ee2a8)](https://modelcontextprotocol.io)
@@ -131,6 +132,23 @@ pwsh -NoProfile -File test.ps1 -Full   # plus the real desktop validation on its
 
 The real validation shows its test windows without activation and closes them at the end; real mouse and keyboard
 checks run only when the PC has been idle for 120 s, otherwise they are reported as skipped.
+
+## Privacy
+
+NexusWindows for Antigravity runs entirely on your PC. It has no account, no telemetry, no analytics and makes no
+network requests of its own.
+
+- **What it reads**: window titles, the accessibility tree and window images of the applications the agent works
+  in, only when a tool is called. Password managers are neither read nor driven.
+- **Where it goes**: tool results are returned to Antigravity, which may send them to Google under its own privacy
+  policy; this server sends nothing anywhere else.
+- **What it stores**, under `~/.nexusagy/`: the Python environment, an action log `computer.log` (action, method,
+  window, duration, outcome and short details such as a target label, coordinates, key names, a menu path or the
+  number of characters typed, never the typed text; rotated at 5 MB, three backups) and screenshots (at most 50,
+  each kept under 24 hours). Under `~/.nexus/`: the shared foreground token and emergency-stop state.
+- **Removing it**: remove the server from Antigravity's MCP settings, then delete `~/.nexusagy/`.
+
+Questions or concerns: open an issue on this repository.
 
 ## Limits
 

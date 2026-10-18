@@ -5,6 +5,7 @@ Le pont Chrome est NexusBrowser (serveur « nexus-browser », commun aux trois a
 """
 
 import json
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -14,12 +15,33 @@ from mcp.server.mcpserver import Image, MCPServer
 from mcp.types import ToolAnnotations
 
 try:
-    from . import agent_guard, computer_client, emergency_stop, physical_input
+    from . import agent_guard
 except ImportError:
     import agent_guard
-    import computer_client
-    import emergency_stop
-    import physical_input
+
+
+class WindowsOnly:
+    """Hors Windows, à la place des modules du bureau (ctypes.windll, UI Automation) : le serveur démarre et liste ses
+    outils (annuaires MCP qui le lancent dans un conteneur Linux), chaque appel d'outil répond que Windows est requis."""
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+
+    def __getattr__(self, attribute: str) -> Any:
+        raise RuntimeError(f"NexusWindows pilote le bureau Windows : {self._name} indisponible sous {sys.platform}.")
+
+
+if sys.platform == "win32":
+    try:
+        from . import computer_client, emergency_stop, physical_input
+    except ImportError:
+        import computer_client
+        import emergency_stop
+        import physical_input
+else:
+    computer_client: Any = WindowsOnly("computer_client")
+    emergency_stop: Any = WindowsOnly("emergency_stop")
+    physical_input: Any = WindowsOnly("physical_input")
 
 
 class CuratedMCPServer(MCPServer):
@@ -74,11 +96,35 @@ MOVE = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_
 ACT = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=True)
 
 
+# Titre lisible de chaque outil (affiché par les clients et les annuaires MCP), ajouté à ses annotations.
+TITLES = {
+    "computer_list_windows": "List windows",
+    "computer_look": "Look at a window",
+    "computer_act": "Act in a window (verified batch)",
+    "computer_open_path": "Open an app, folder or document",
+    "computer_close_window": "Close a window",
+    "computer_list_apps": "List apps",
+    "computer_focus_window": "Focus a window",
+    "computer_get_window_state": "Window state",
+    "computer_click": "Click",
+    "computer_mouse_move": "Move the mouse",
+    "computer_type_text": "Type text",
+    "computer_press_key": "Press keys",
+    "computer_scroll": "Scroll",
+    "computer_drag": "Drag",
+    "computer_take_screenshot": "Screenshot",
+}
+
+
+def _titled(func: Any, annotations: ToolAnnotations) -> ToolAnnotations:
+    return annotations.model_copy(update={"title": TITLES[func.__name__]})
+
+
 def _register_computer_tool(annotations: ToolAnnotations) -> Callable[[Any], Any]:
     """Outil principal du bureau, listé à Gemini."""
 
     def register(func: Any) -> Any:
-        computer_mcp.add_tool(func, annotations=annotations, structured_output=False)
+        computer_mcp.add_tool(func, annotations=_titled(func, annotations), structured_output=False)
         return func
 
     return register
@@ -88,7 +134,7 @@ def _register_legacy_computer_tool(annotations: ToolAnnotations) -> Callable[[An
     """Alias conservé : appelable par son nom, non listé (mêmes garde-fous que computer_act)."""
 
     def register(func: Any) -> Any:
-        computer_mcp.add_tool(func, annotations=annotations, structured_output=False)
+        computer_mcp.add_tool(func, annotations=_titled(func, annotations), structured_output=False)
         computer_mcp.hidden_tools.add(func.__name__)
         return func
 
@@ -585,8 +631,9 @@ if __name__ == "__main__":
     parser.add_argument("--server", choices=["computer"], default="computer", help="computer (5 outils listés)")
     parser.parse_args()
 
-    # Arrêt d'urgence commun (Ctrl+Alt+Maj+Échap) : surveillance de ~/.nexus/stop et tentative de prise du raccourci.
-    emergency_stop.start()
-    # Gestes physiques de Julien (Raw Input) : pause avant toute vraie souris/clavier, interruption s'il reprend la main.
-    physical_input.start()
+    if sys.platform == "win32":
+        # Arrêt d'urgence commun (Ctrl+Alt+Maj+Échap) : surveillance de ~/.nexus/stop et prise du raccourci.
+        emergency_stop.start()
+        # Gestes physiques de Julien (Raw Input) : pause avant toute vraie souris/clavier, interruption s'il reprend.
+        physical_input.start()
     computer_mcp.run(transport="stdio")
