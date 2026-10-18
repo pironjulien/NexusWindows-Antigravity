@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "nexus-computer": {
+      "command": "pwsh",
+      "args": [
+        "-NoProfile",
+        "-File",
+        "scripts/start-computer-mcp.ps1"
+      ]
+    }
+  }
+}

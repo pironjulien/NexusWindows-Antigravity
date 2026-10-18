@@ -1,139 +1,144 @@
-# Antigravity Computer Use — SOTA Windows OS Automation & Spotlight Companion 🖥️⚡
+# NexusWindows for Antigravity
 
-[![Windows 11 Native](https://img.shields.io/badge/Windows-10%20%2F%2011%20Native-0078D4?logo=windows&logoColor=white)](https://microsoft.com/windows)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://python.org)
-[![Model Context Protocol](https://img.shields.io/badge/MCP-FastMCP-FF6F00?logo=anthropic&logoColor=white)](https://modelcontextprotocol.io/)
-[![Google Antigravity Native](https://img.shields.io/badge/Agent-Google%20Antigravity-4285F4?logo=google&logoColor=white)](https://github.com/pironjulien/antigravity-computer-use)
-[![UI Automation 3.0](https://img.shields.io/badge/Engine-Windows%20UI%20Automation%203.0-34A853)](https://learn.microsoft.com/windows/win32/winauto/entry-uiauto-win32)
-[![Ultra-Low Latency Focus Guard](https://img.shields.io/badge/Focus%20Guard-10--50%20ms%20WinEventHook-2ea44f)](https://github.com/pironjulien/antigravity-computer-use)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Author](https://img.shields.io/badge/Author-Julien%20Piron-10a37f)](https://julienpiron.fr)
+[![Release](https://img.shields.io/github/v/release/pironjulien/antigravity-windows-computer-use)](https://github.com/pironjulien/antigravity-windows-computer-use/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white)](pyproject.toml)
+[![MCP](https://img.shields.io/badge/MCP-server-7ee2a8)](https://modelcontextprotocol.io)
+[![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4)](#install)
 
-> **Autonomous Windows Computer Use engine and global Spotlight desktop companion (`Alt + Space`) engineered exclusively for Google Antigravity and Gemini multimodal models.**
->
-> 🚀 **Drive Windows desktop applications in the background with zero focus stealing, zero unwanted cursor movement, strict Z-order preservation, and ultra-fast focus restoration (10–50 ms WinEventHook).**
+[![NexusWindows: Windows computer use for AI agents, in the background. Works with Claude, Codex and Antigravity.](docs/assets/banner.webp)](https://julienpiron.fr/nexuswindows/)
 
----
+**Windows computer use for Antigravity, in the background.** An MCP server (`nexus-computer`) that lets Google
+Antigravity (Gemini) see and operate Windows desktop applications while the user keeps their mouse, keyboard and
+foreground window. Built for a fast model: one look, then one batch of steps with label targets, and every reply
+says what to do next.
 
-## 🎬 Demonstration: 100% Background Execution
+Version 2.8.2 · Windows 10/11 · Python 3.10+ · MIT licence
 
-![Antigravity Computer Use Studio Demo](assets/demo.webp)
+Part of the Nexus family: [NexusWindows](https://julienpiron.fr/nexuswindows/)
+([Claude](https://github.com/pironjulien/claude-windows-computer-use) ·
+[Codex](https://github.com/pironjulien/codex-windows-computer-use) ·
+[Antigravity](https://github.com/pironjulien/antigravity-windows-computer-use)),
+[NexusBrowser](https://julienpiron.fr/nexusbrowser/) ([repo](https://github.com/pironjulien/chrome-computer-use)),
+[NexusAndroid](https://julienpiron.fr/nexusandroid/) ([repo](https://github.com/pironjulien/android-computer-use)).
+Project page: [julienpiron.fr/nexuswindows](https://julienpiron.fr/nexuswindows/).
 
-*Target applications are automated silently in the background via UI Automation 3.0 patterns (`TogglePattern`, `ValuePattern`, `InvokePattern`, `WindowPattern`) and offscreen GDI buffers, while the user's physical focus and mouse remain completely undisturbed in the foreground.*
+## Why
 
----
+Screenshot-and-click computer use moves the real cursor and brings windows to the front, so the person at the PC has
+to stop working while the agent acts. Most Windows applications can be driven without that: native controls accept
+window messages and modern frameworks expose UI Automation. This server acts in the background first, reads the
+effect back, and only falls back to the real mouse or keyboard when the step allows it (`foreground=True`).
 
-## ⚡ How Antigravity Computer Use Transforms OS Automation
+## Tools
 
-Conventional OS automation frameworks rely on full-screen screenshots, coarse pixel coordinate guessing by vision models, physical mouse cursor movement, and forced window focus. This disrupts user workflows and prevents concurrent agent operation.
+Five listed MCP tools; the ten older names (`computer_click`, `computer_type_text`...) stay callable as unlisted
+aliases.
 
-`antigravity-computer-use` adopts a **deterministic, background-first paradigm**:
+| Tool | Purpose |
+| --- | --- |
+| `computer_list_windows` | Application windows (`by_app=true`: grouped by application) |
+| `computer_look` | One line per element `[N] role « name » = « value » states @x,y`, plus an image, without bringing the window forward |
+| `computer_act` | Several steps in one call (click, type, check, uncheck, select, menu, keys...), each read back |
+| `computer_open_path` | Open a document, folder, program, script or shortcut; the opening is read back |
+| `computer_close_window` | Close a window (UI Automation, then `WM_CLOSE`) |
 
-| Feature | Conventional Automation | **Antigravity Computer Use (`nexus-computer`)** |
-| :--- | :--- | :--- |
-| **Background Execution** | ❌ Window must be visible in foreground | ✅ **100% Native Background** (no focus theft) |
-| **Focus Hijacking** | ⚠️ Steals keyboard focus and foreground window | ⚡ **Zero Focus Theft** (10–50 ms `WinEventHook` with auto-restoration) |
-| **Cursor Takeover** | ⚠️ Physical mouse moved across screen | 🟢 **Zero Cursor Movement** (Deterministic COM UI Automation invocation) |
-| **Control Targeting** | 👁️ Coarse pixel coordinate estimation | 🎯 **COM UI Automation 3.0 + Set-of-Marks `[#1..#N]` + Gemini `box_2d` `[ymin, xmin, ymax, xmax]`** |
-| **Clean Window Closing** | ❌ Force-killing processes (`taskkill`) | 🛡️ **Deterministic `computer_close_window`** (`WindowPattern.Close()` then graceful `WM_CLOSE`) |
-| **Occluded / Covered Windows** | ❌ Fails if window is obscured | 📸 **Offscreen GDI Buffer** (`PrintWindow` `PW_RENDERFULLCONTENT`) |
-| **Image Protocol Safety** | ⚠️ Heavy PNGs (> 1 MB) triggering Cloud API 400 | 🛡️ **WebP Compressed < 200 KB** (Guaranteed Anti-Crash 400 guard) |
-| **Keyboard & Character Sets** | ❌ Fragile on non-US layouts | 🌍 **Universal Unicode SendInput + UTF-16 surrogates (AZERTY, accents, emojis)** |
-| **Desktop Companion** | ❌ None | ⚡ **Global Floating Spotlight (`Alt + Space`)** with *Work with Apps* detection |
+Tool descriptions and replies are in French; tool and parameter names are in English.
 
----
+## What it does
 
-## 🏛️ Deterministic Architecture
+- **Designed for Gemini**: golden rule *look, then act in one batch with label targets*; every action reply carries
+  a one-line `next` (✓ done · = already done, do not redo · ~ effect not seen, look at the attached image · ✗ failure,
+  cause and what to try) and, when the effect was not read back, a compact WebP image (≤ 1280 px) of the window. A
+  batch identical to one sent in the last 10 s on the same window without a `computer_look` in between is
+  **refused** (`repeat=true` forces it).
+- **Background first, even with `foreground=True`**: a `box_2d` or (x, y) target is mapped to the element under the
+  point in the window's own UI Automation tree (covered windows included) and handled like a label target; a click on
+  a text field *retains* it, so `type` without target, `ctrl+a`, `ctrl+v` and erase keys become background writes
+  read back; plain keys are posted (`WM_KEYDOWN`/`WM_KEYUP`) in Win32, WinForms and WPF. Real mouse and keyboard only
+  as a fallback with `foreground=True`; otherwise an explicit refusal (`needs_foreground`) and nothing is sent.
+- **Per UI family**: Win32 → direct messages (`BN_CLICKED`, `BM_SETCHECK`, `EM_REPLACESEL`, `CB_SETCURSEL` /
+  `LB_SETCURSEL` with their notifications, menu `WM_COMMAND`); WinForms → UI Automation then messages; WPF, UWP,
+  Chromium → UI Automation only. Never UI Automation Invoke on a Win32 button (its proxy activates the window) nor
+  Select on a Win32 list (silent).
+- **One cross-process read**: the window-scoped UI Automation tree is read in one round trip
+  (`IUIAutomationCacheRequest` + `BuildCache`, `AutoSetFocus = False`). A truncated or failed read is reported
+  (`uia.status`, `warning`), never a silent empty list.
+- **Read-back after every action**: `verified` true/false/None from a real read (field value, check state,
+  selection, focused element, window title, image); `success` is never true on "command sent" alone. Steps accept a
+  postcondition `expect` (already true: step skipped with `already: true`; false after: step failed).
+- **The user's physical input via Raw Input** (injected input ignored): wait for a pause before any real mouse or
+  keyboard action, and stop at the next checkpoint if the user touches keyboard or mouse (`interrupted_by_user`).
+- **Guards in the code, not only in the instructions**: the window is always named (never the foreground one by
+  default, ambiguous titles refused with the candidates); an ambiguous label is refused with the candidates; the
+  target window is read back in the foreground right before every `SendInput`; password managers (KeePass,
+  KeePassXC, Bitwarden, 1Password, Dashlane, NordPass, RoboForm, LastPass) are never looked at, captured or driven;
+  the sign-in screen, lock screen and UAC prompt are refused. An action labelled pay, buy, order, transfer money,
+  send, publish, delete permanently, uninstall, format, reset, cancel a subscription, erase data or make a repository
+  public needs `confirm: true` on the step, and so does any key, `submit` or coordinate click that would trigger one.
+  `NEXUS_AGY_CONFIRM=off` in the MCP server environment turns confirmation off entirely (default: on).
+- **Clipboard**: saved in all its formats and restored; the text put there is excluded from Win+V history and cloud
+  clipboard. Used only as a last resort for typing (multi-line or more than 300 characters).
+- **Shared with the other desktop agents of the PC**: foreground token (`%USERPROFILE%\.nexus\foreground.lock`) and
+  emergency stop (Ctrl+Alt+Shift+Esc, `%USERPROFILE%\.nexus\stop`), the same file protocols as
+  [NexusWindows for Claude](https://github.com/pironjulien/claude-windows-computer-use#working-alongside-other-agents).
 
-```mermaid
-flowchart TD
-    AGY["Google Antigravity<br/>(CLI agy / Antigravity IDE)"] -->|"Model Context Protocol (FastMCP)"| MCPServer["Antigravity MCP Server<br/>(client/mcp_server.py)"]
-    
-    subgraph EngineCore ["Windows Core Engine"]
-        Router{"Execution Strategy"}
-        
-        Router -->|"Click / Toggle / Select"| UIA_Action["COM UI Automation 3.0 Patterns<br/>(Toggle / Value / Invoke / Window)"]
-        Router -->|"State Inspection & Grounding"| UIA_Tree["Recursive UIA Tree Traversal<br/>Set-of-Marks and Gemini box_2d"]
-        Router -->|"Safe Screen Capture"| GDI["Win32 Offscreen GDI Buffer<br/>PrintWindow PW_RENDERFULLCONTENT"]
-        Router -->|"Hardware Action Required"| FocusGuard["ForegroundGuard (10-50ms WinEventHook)<br/>Immediate Z-Order Restoration"]
-    end
-    
-    MCPServer --> EngineCore
-    
-    UIA_Action --> TargetApp["Target Windows Application<br/>(VS Code, Chrome, Terminal, Office, Win32/WPF/WinUI)"]
-    GDI --> TargetApp
-    
-    style EngineCore fill:#161b22,stroke:#4285f4,stroke-width:2px
-    style TargetApp fill:#0d1117,stroke:#34a853,stroke-width:2px
+## Architecture
+
+| Path | Role |
+| --- | --- |
+| `client/mcp_server.py` | MCP server `nexus-computer` (stdio), started by `scripts/start-computer-mcp.ps1` |
+| `client/computer_client.py` | Windows engine: windows, UI Automation, Win32 messages, capture, actions and read-back |
+| `client/uia_fast.py`, `client/win32_controls.py` | One-round-trip UI Automation reads, native control messages |
+| `client/physical_input.py`, `client/agent_guard.py`, `client/emergency_stop.py` | The user's presence (Raw Input), batch guard, shared emergency stop |
+| `client/foreground_lock.py`, `client/garde_fous.py`, `client/garde-fous.json` | Shared foreground token and guard-rail policy, common to the author's desktop agents (also used by NexusWindows for Claude). Vendored in the public copy; in the author's setup they live in a sibling `shared` folder |
+| `plugins/nexus-computer/` | Antigravity plugin and the agent guide (`SKILL.md`) |
+| `tests/` | Unit tests (pytest) and the real desktop validation |
+
+## Install
+
+Requirements: Windows 10 or 11, PowerShell 7, [uv](https://docs.astral.sh/uv/) (installed by `install.ps1` through
+winget if missing).
+
+```powershell
+git clone https://github.com/pironjulien/antigravity-windows-computer-use.git
+cd antigravity-windows-computer-use
+pwsh -NoProfile -File install.ps1
 ```
 
----
-
-## 🔌 Native Integration with Google Antigravity
-
-The `antigravity-computer-use` MCP server integrates natively into Google Antigravity via your `mcp_config.json`:
+The Python environment, logs and screenshots live in `%USERPROFILE%\.nexusagy` (outside the clone). Then declare
+the server in Antigravity's `mcp_config.json`:
 
 ```json
 {
   "mcpServers": {
     "nexus-computer": {
-      "command": "python",
-      "args": [
-        "C:/Dev/antigravity-computer-use/client/mcp_server.py",
-        "--scope",
-        "computer"
-      ]
+      "command": "pwsh",
+      "args": ["-NoProfile", "-File", "C:/path/to/antigravity-windows-computer-use/scripts/start-computer-mcp.ps1"]
     }
   }
 }
 ```
 
----
+The agent guide is `plugins/nexus-computer/skills/nexus-computer/SKILL.md`.
 
-## 🛠️ MCP Tools Directory
+## Checks
 
-| MCP Tool | Background Safe | Description |
-| :--- | :---: | :--- |
-| `computer_list_windows` | ✅ Yes | Enumerates interactive windows with HWNDs, titles, geometries, and foreground status. |
-| `computer_list_apps` | ✅ Yes | Groups active windows by executable process (`chrome`, `code`, `pwsh`...). |
-| `computer_get_window_state` | ✅ Yes | Extracts UI Automation tree with Set-of-Marks `[#1..#N]` and Gemini `box_2d` coordinates `[ymin, xmin, ymax, xmax]`. |
-| `computer_focus_window` | ⚠️ Focus Guard | Gracefully activates target window without disrupting desktop layout. |
-| `computer_close_window` | ✅ Yes | Deterministically closes windows via UIA `WindowPattern.Close()` with graceful `WM_CLOSE` fallback. |
-| `computer_click` | ✅ Yes | Deterministic background click via UIA (`Invoke`, `Toggle`, `Select`) with zero physical cursor movement. |
-| `computer_type_text` | ✅ Yes | Direct background text input via `ValuePattern`, with graceful Unicode typing fallback. |
-| `computer_press_key` | ⚠️ Focus Guard | Injects keyboard shortcuts (`Ctrl+Shift+P`, `Win+R`) with ForegroundGuard protection. |
-| `computer_scroll` | ✅ Yes | Scrolls UIA container vertically or horizontally without physical mouse wheel events. |
-| `computer_mouse_move` | ⚠️ Focus Guard | Smooth Bézier mouse movement trajectory when physical hardware interaction is explicitly required. |
-| `computer_drag` | ⚠️ Focus Guard | Multi-step drag and drop between two coordinate points. |
-| `computer_take_screenshot` | ✅ Yes | Offscreen screenshot without focus theft, compressed to WebP < 200 KB (Anti-Crash 400). |
-| `computer_spotlight_status` | ✅ Yes | Checks if the global floating HUD (`Alt + Space`) is active. |
-| `computer_spotlight_toggle` | ✅ Yes | Shows or hides the floating desktop companion. |
-
----
-
-## 🚀 Quickstart & Testing
-
-### 1. Clone the Repository
-```bash
-git clone https://github.com/pironjulien/antigravity-computer-use.git
-cd antigravity-computer-use
-```
-
-### 2. Run Deterministic Test Suite (26 Unit Tests)
-```bash
-pytest tests/test_computer.py tests/test_spotlight.py -v
-```
-
-### 3. Launch the Spotlight Companion (`Alt + Space`)
 ```powershell
-pwsh -NoProfile -File client/spotlight_launcher.ps1
+pwsh -NoProfile -File test.ps1         # offline: ruff, Pyright, pytest
+pwsh -NoProfile -File test.ps1 -Full   # plus the real desktop validation on its own Win32, WinForms and WPF windows
 ```
-*Press `Alt + Space` anywhere in Windows to summon the Antigravity HUD.*
 
----
+The real validation shows its test windows without activation and closes them at the end; real mouse and keyboard
+checks run only when the PC has been idle for 120 s, otherwise they are reported as skipped.
 
-## 👨‍💻 Author & License
+## Limits
 
-Engineered in symbiosis by **Julien Piron** ([julienpiron.fr](https://julienpiron.fr) • [julienpiron.com](https://julienpiron.com) • X: [@julienpironfr](https://x.com/julienpironfr)).
+- Windows only. Tool descriptions, replies and code comments are in French.
+- Keyboard input is refused in UWP/WinUI and Chromium, and Ctrl/Alt shortcuts in WPF, where it cannot be done in the
+  background; for web pages, [NexusBrowser](https://github.com/pironjulien/chrome-computer-use) is more reliable.
+- An effect with nothing readable stays `~` (not verified).
 
-Released under the **MIT License**. See [LICENSE](LICENSE) for details.
+## Licence
+
+MIT, see [LICENSE](LICENSE). Copyright (c) 2026 Julien Piron.

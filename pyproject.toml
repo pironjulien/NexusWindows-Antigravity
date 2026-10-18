@@ -1,18 +1,19 @@
 [project]
-name = "antigravity-computer-use"
-version = "2.5.0"
-description = "SOTA Windows OS Computer Use & Spotlight Companion for Google Antigravity"
+name = "nexus-agy"
+version = "2.8.2"
+description = "Computer Use Windows pour Google Antigravity (le pont Chrome vit dans NexusBrowser)"
 requires-python = ">=3.10"
 dependencies = [
-    "mcp>=1.0.0,<2",
+    "comtypes>=1.4.17,<2",
+    "mcp>=2.3.0,<3",
     "mss>=9.0,<11",
     "pillow>=12.3,<13",
     "uiautomation>=2.0,<3",
-    "websockets>=12.0,<17",
 ]
 
 [dependency-groups]
 dev = [
+    "pyright==1.1.407",
     "pytest>=8.0,<10",
     "ruff>=0.12,<1",
 ]
@@ -24,7 +25,8 @@ link-mode = "copy"
 [tool.ruff]
 line-length = 120
 target-version = "py310"
-extend-exclude = ["tests/_live", ".backups"]
+# Copie publique seulement : modules de shared copiés dans client/ par l'export (vérifiés dans leur propre dépôt).
+extend-exclude = ["client/foreground_lock.py", "client/garde_fous.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP"]
@@ -32,3 +34,9 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+[tool.pyright]
+include = ["client", "scripts", "tests"]
+pythonVersion = "3.10"
+# Modules charges par chemin (sys.path) : le client et les modules communs du dossier shared voisin.
+extraPaths = ["client", ".", "../shared"]

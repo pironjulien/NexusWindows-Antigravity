@@ -1,60 +1,57 @@
-"""Real bridge handlers served on ephemeral ports with a disposable credential."""
+"""Isolation commune des tests : arrêt d'urgence, journal du bureau et état des agents propres à chaque test."""
 
-import asyncio
+import importlib
 import sys
-import threading
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "native-host"))
-
-try:
-    import bridge_server
-    from bridge_security import load_or_create_token
-except ImportError:
-    bridge_server = None
-    load_or_create_token = None
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "client"))
 
 
-@pytest.fixture(scope="module", autouse=True)
-def isolated_bridge(request, tmp_path_factory):
-    if bridge_server is None or not hasattr(request.module, "HTTP_PORT"):
-        yield
-        return
-    token_file = tmp_path_factory.mktemp("bridge") / "token"
-    load_or_create_token(token_file)
-    patch = pytest.MonkeyPatch()
-    patch.setenv("NEXUSAGY_BRIDGE_TOKEN_FILE", str(token_file))
-    patch.setattr(bridge_server, "BRIDGE_TOKEN_PATH", token_file)
-    loop = asyncio.new_event_loop()
-    thread = threading.Thread(target=loop.run_forever, daemon=True)
-    thread.start()
+# Les tests importent le client sous deux noms (« emergency_stop » et « client.emergency_stop ») : deux copies du
+# module, chacune redirigée.
+_STOP_MODULES = ("emergency_stop", "client.emergency_stop")
 
-    async def start():
-        http = await asyncio.start_server(
-            bridge_server.handle_http, "127.0.0.1", 0, limit=bridge_server.MAX_HEADER_BYTES + 4
-        )
-        ws = await bridge_server.serve(bridge_server.ws_handler, "127.0.0.1", 0)
-        return http, ws
 
-    servers = asyncio.run_coroutine_threadsafe(start(), loop).result(timeout=5)
-    port = servers[0].sockets[0].getsockname()[1]
-    patch.setattr(request.module, "HTTP_PORT", port, raising=False)
-    patch.setattr(request.module, "STATUS_URL", f"http://127.0.0.1:{port}/api/status", raising=False)
-    patch.setattr(request.module, "COMMAND_URL", f"http://127.0.0.1:{port}/api/command", raising=False)
-    patch.setattr(request.module, "WS_URL", f"ws://127.0.0.1:{servers[1].sockets[0].getsockname()[1]}", raising=False)
-    try:
-        yield
-    finally:
+@pytest.fixture(autouse=True)
+def isolated_emergency_stop(tmp_path_factory, monkeypatch):
+    """Aucun test n'écrit ni ne lit le vrai ~/.nexus/stop (il figerait les autres agents de Julien), et chaque test
+    part d'un arrêt levé."""
+    directory = tmp_path_factory.mktemp("nexus-stop")
+    for name in _STOP_MODULES:
+        module = importlib.import_module(name)
+        monkeypatch.setattr(module, "STOP_FILE", directory / "stop")
+        monkeypatch.setattr(module, "OWNER_FILE", directory / "stop.owner")
+        monkeypatch.setattr(module, "_latched_until", 0.0)
+        monkeypatch.setattr(module, "_seen_version", None)
+    yield directory
 
-        async def stop():
-            for server in servers:
-                server.close()
-                await server.wait_closed()
 
-        asyncio.run_coroutine_threadsafe(stop(), loop).result(timeout=5)
-        loop.call_soon_threadsafe(loop.stop)
-        thread.join(timeout=5)
-        loop.close()
-        patch.undo()
+_LOGGER_MODULES = ("computer_logger", "client.computer_logger")
+
+
+@pytest.fixture(autouse=True)
+def isolated_computer_log(tmp_path_factory, monkeypatch):
+    """Aucun test n'écrit dans le vrai ~/.nexusagy/computer.log (constat du 16/10 : cibles factices, « voler »,
+    « échec simulé » s'y mêlaient à l'usage réel de Gemini) : journal redirigé vers un dossier temporaire."""
+    directory = tmp_path_factory.mktemp("nexus-log")
+    for name in _LOGGER_MODULES:
+        module = importlib.import_module(name)
+        monkeypatch.setattr(module, "LOG_DIR", directory)
+        monkeypatch.setattr(module, "LOG_FILE", directory / "computer.log")
+    yield directory
+
+
+@pytest.fixture(autouse=True)
+def fresh_agent_state():
+    """Chaque test part sans lot mémorisé par la garde anti-répétition ni champ retenu par un clic."""
+    for name in ("agent_guard", "client.agent_guard"):
+        module = sys.modules.get(name)
+        if module is not None:
+            module.GUARD.reset()
+    for name in ("computer_client", "client.computer_client"):
+        module = sys.modules.get(name)
+        if module is not None:
+            module._designated.clear()
+    yield
