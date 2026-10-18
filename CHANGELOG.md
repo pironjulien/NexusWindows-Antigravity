@@ -18,6 +18,12 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 - GitHub Actions: `test.ps1` on Windows and the startup test on Linux, with a Tests badge; `glama.json`.
 - README: Privacy section.
 
+### Changed
+
+- Shared guard-rail policy updated (same file as the Claude, Codex and Android editions): calling ("appeler",
+  "call") now needs `confirm: true` too.
+- `SECURITY.md`: private vulnerability reporting.
+
 ## [2.8.2] - 2026-10-18
 
 ### Changed
