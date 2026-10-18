@@ -20,6 +20,8 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ### Changed
 
+- Shared guard-rail policy updated (nexus-shared 6d82bbb): erasing, resetting or formatting the whole device now
+  needs confirmation too; "erase everything" counts only on a reset screen.
 - Shared guard-rail policy updated (same file as the Claude, Codex and Android editions): calling ("appeler",
   "call") now needs `confirm: true` too.
 - `SECURITY.md`: private vulnerability reporting.
