@@ -6,6 +6,10 @@ if (-not (Test-Path $pythonExe)) { throw "Executer install.ps1 pour preparer le 
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 & $pythonExe -m ruff format --check $PSScriptRoot
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
+# Enveloppes COM d'UI Automation (comtypes.gen), generees dans l'environnement au premier import : un environnement
+# neuf (CI, nouveau clone) n'en a pas encore, et Pyright ne verrait pas comtypes.gen.UIAutomationClient.
+& $pythonExe -c "import comtypes.client; comtypes.client.GetModule('UIAutomationCore.dll')"
+if ($LASTEXITCODE) { exit $LASTEXITCODE }
 # Types : ce que l'editeur d'Antigravity signale (zero erreur attendue).
 & $pythonExe -m pyright --project $PSScriptRoot --pythonpath $pythonExe $PSScriptRoot
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
