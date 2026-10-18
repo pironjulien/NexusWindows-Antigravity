@@ -1,7 +1,7 @@
 # NexusWindows for Antigravity
 
-[![Release](https://img.shields.io/github/v/release/pironjulien/antigravity-windows-computer-use)](https://github.com/pironjulien/antigravity-windows-computer-use/releases)
-[![Tests](https://github.com/pironjulien/antigravity-windows-computer-use/actions/workflows/tests.yml/badge.svg)](https://github.com/pironjulien/antigravity-windows-computer-use/actions/workflows/tests.yml)
+[![Release](https://img.shields.io/github/v/release/pironjulien/NexusWindows-Antigravity)](https://github.com/pironjulien/NexusWindows-Antigravity/releases)
+[![Tests](https://github.com/pironjulien/NexusWindows-Antigravity/actions/workflows/tests.yml/badge.svg)](https://github.com/pironjulien/NexusWindows-Antigravity/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white)](pyproject.toml)
 [![MCP](https://img.shields.io/badge/MCP-server-7ee2a8)](https://modelcontextprotocol.io)
@@ -17,11 +17,11 @@ says what to do next.
 Version 2.8.2 · Windows 10/11 · Python 3.10+ · MIT licence
 
 Part of the Nexus family: [NexusWindows](https://julienpiron.fr/nexuswindows/)
-([Claude](https://github.com/pironjulien/claude-windows-computer-use) ·
-[Codex](https://github.com/pironjulien/codex-windows-computer-use) ·
-[Antigravity](https://github.com/pironjulien/antigravity-windows-computer-use)),
-[NexusBrowser](https://julienpiron.fr/nexusbrowser/) ([repo](https://github.com/pironjulien/chrome-computer-use)),
-[NexusAndroid](https://julienpiron.fr/nexusandroid/) ([repo](https://github.com/pironjulien/android-computer-use)).
+([Claude](https://github.com/pironjulien/NexusWindows-Claude) ·
+[Codex](https://github.com/pironjulien/NexusWindows-Codex) ·
+[Antigravity](https://github.com/pironjulien/NexusWindows-Antigravity)),
+[NexusBrowser](https://julienpiron.fr/nexusbrowser/) ([repo](https://github.com/pironjulien/NexusBrowser)),
+[NexusAndroid](https://julienpiron.fr/nexusandroid/) ([repo](https://github.com/pironjulien/NexusAndroid)).
 Project page: [julienpiron.fr/nexuswindows](https://julienpiron.fr/nexuswindows/).
 
 ## Why
@@ -82,7 +82,7 @@ Tool descriptions and replies are in French; tool and parameter names are in Eng
   clipboard. Used only as a last resort for typing (multi-line or more than 300 characters).
 - **Shared with the other desktop agents of the PC**: foreground token (`%USERPROFILE%\.nexus\foreground.lock`) and
   emergency stop (Ctrl+Alt+Shift+Esc, `%USERPROFILE%\.nexus\stop`), the same file protocols as
-  [NexusWindows for Claude](https://github.com/pironjulien/claude-windows-computer-use#working-alongside-other-agents).
+  [NexusWindows for Claude](https://github.com/pironjulien/NexusWindows-Claude#working-alongside-other-agents).
 
 ## Architecture
 
@@ -102,8 +102,8 @@ Requirements: Windows 10 or 11, PowerShell 7, [uv](https://docs.astral.sh/uv/) (
 winget if missing).
 
 ```powershell
-git clone https://github.com/pironjulien/antigravity-windows-computer-use.git
-cd antigravity-windows-computer-use
+git clone https://github.com/pironjulien/NexusWindows-Antigravity.git
+cd NexusWindows-Antigravity
 pwsh -NoProfile -File install.ps1
 ```
 
@@ -115,7 +115,7 @@ the server in Antigravity's `mcp_config.json`:
   "mcpServers": {
     "nexus-computer": {
       "command": "pwsh",
-      "args": ["-NoProfile", "-File", "C:/path/to/antigravity-windows-computer-use/scripts/start-computer-mcp.ps1"]
+      "args": ["-NoProfile", "-File", "C:/path/to/NexusWindows-Antigravity/scripts/start-computer-mcp.ps1"]
     }
   }
 }
@@ -154,7 +154,7 @@ Questions or concerns: open an issue on this repository.
 
 - Windows only. Tool descriptions, replies and code comments are in French.
 - Keyboard input is refused in UWP/WinUI and Chromium, and Ctrl/Alt shortcuts in WPF, where it cannot be done in the
-  background; for web pages, [NexusBrowser](https://github.com/pironjulien/chrome-computer-use) is more reliable.
+  background; for web pages, [NexusBrowser](https://github.com/pironjulien/NexusBrowser) is more reliable.
 - An effect with nothing readable stays `~` (not verified).
 
 ## Licence
