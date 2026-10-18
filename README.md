@@ -9,6 +9,8 @@
 
 [![NexusWindows: Windows computer use for AI agents, in the background. Works with Claude, Codex and Antigravity.](docs/assets/banner.webp)](https://julienpiron.fr/nexuswindows/)
 
+![NexusWindows for Antigravity: an AI agent fills and submits a form through computer_act in a window that stays behind another one, five steps read back](docs/assets/demo.webp)
+
 **Windows computer use for Antigravity, in the background.** An MCP server (`nexus-computer`) that lets Google
 Antigravity (Gemini) see and operate Windows desktop applications while the user keeps their mouse, keyboard and
 foreground window. Built for a fast model: one look, then one batch of steps with label targets, and every reply

@@ -17,6 +17,8 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
   `uiautomation`) are installed on Windows only.
 - GitHub Actions: `test.ps1` on Windows and the startup test on Linux, with a Tests badge; `glama.json`.
 - README: Privacy section.
+- README: demo (animated WebP, GIF fallback) recorded with this server's own `computer_act` on neutral test
+  windows: one batch of five steps in a window behind another, the user's window untouched.
 
 ### Changed
 
