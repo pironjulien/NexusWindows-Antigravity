@@ -83,6 +83,11 @@ Tool descriptions and replies are in French; tool and parameter names are in Eng
   `NEXUS_AGY_CONFIRM=off` in the MCP server environment turns confirmation off entirely (default: on).
 - **Clipboard**: saved in all its formats and restored; the text put there is excluded from Win+V history and cloud
   clipboard. Used only as a last resort for typing (multi-line or more than 300 characters).
+- **Agent at work**: while an action runs (`computer_act`, opening, closing, focusing and the action aliases; never
+  the reads), a small logo spins on itself in the bottom-right corner of the driven window's screen, like a game
+  loading screen, with a breathing blue halo, and goes away 1.6 s after the last action. Always on top, borderless,
+  click-through, never activated, absent from the taskbar and excluded from screen captures (`busy_indicator.py`).
+  `NEXUS_WINDOWS_INDICATOR=0` turns it off.
 - **Shared with the other desktop agents of the PC**: foreground token (`%USERPROFILE%\.nexus\foreground.lock`) and
   emergency stop (Ctrl+Alt+Shift+Esc, `%USERPROFILE%\.nexus\stop`), the same file protocols as
   [NexusWindows for Claude](https://github.com/pironjulien/NexusWindows-Claude#working-alongside-other-agents).

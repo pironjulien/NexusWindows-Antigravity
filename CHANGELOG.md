@@ -9,6 +9,14 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-10-20 — "Agent at work" indicator
+
+### Added
+- While an action runs (`computer_act`, opening, closing, focusing and the action aliases; never the reads), a logo
+  spins on itself in the bottom-right corner of the driven window's screen with a breathing blue halo, and goes away
+  1.6 s after the last action. Always on top, borderless, click-through, never activated, absent from the taskbar,
+  excluded from screen captures. `NEXUS_WINDOWS_INDICATOR=0` turns it off.
+
 ## [2.9.0] - 2026-10-20 — Exact-action consent, visual fallback, hardened supply chain
 
 ### Added

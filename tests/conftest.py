@@ -55,3 +55,10 @@ def fresh_agent_state():
         if module is not None:
             module._designated.clear()
     yield
+
+
+@pytest.fixture(autouse=True)
+def indicator_off(monkeypatch):
+    """Aucun logo « agent au travail » pendant les tests : rien ne s'affiche à l'écran de Julien (test_busy_indicator
+    l'éprouve sans fenêtre)."""
+    monkeypatch.setenv("NEXUS_WINDOWS_INDICATOR", "0")

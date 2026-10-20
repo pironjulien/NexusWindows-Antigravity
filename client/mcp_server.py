@@ -15,9 +15,10 @@ from mcp.server.mcpserver import Image, MCPServer
 from mcp.types import ToolAnnotations
 
 try:
-    from . import agent_guard
+    from . import agent_guard, busy_indicator
 except ImportError:
     import agent_guard
+    import busy_indicator
 
 
 class WindowsOnly:
@@ -214,10 +215,23 @@ def _computer_action(
     image: bool = True,
 ) -> Any:
     """Action de bureau pour Gemini : garde anti-répétition, compte rendu avec `next` en tête, capture jointe quand
-    l'effet n'est pas relu. Rend le texte JSON, ou [texte, image]."""
+    l'effet n'est pas relu. Rend le texte JSON, ou [texte, image]. Logo « agent au travail » pendant l'action."""
+    with busy_indicator.working(hwnd):
+        return _computer_action_run(kind, hwnd, payload, repeat, call, image)
+
+
+def _computer_action_run(
+    kind: str,
+    hwnd: int | str | None,
+    payload: dict[str, Any],
+    repeat: bool,
+    call: Callable[[int], Any],
+    image: bool,
+) -> Any:
     window = 0
     try:
         window = computer_client.resolve_window(hwnd)
+        busy_indicator.target(window)  # logo sur l'écran de la fenêtre pilotée
         refusal = agent_guard.GUARD.check(kind, window, payload, repeat)
         if refusal:
             out: dict[str, Any] = {
@@ -365,7 +379,8 @@ def computer_open_path(path: str) -> str:
     """Ouvre un chemin existant comme un double-clic (document, dossier, programme, script, raccourci), ouverture
     relue. Refusées : URL et protocoles (pages web : nexus-browser).
     Exemple : {"path": "C:\\\\Dev"}"""
-    return _format_computer_result(computer_client.open_path, path_or_url=path)
+    with busy_indicator.working():
+        return _format_computer_result(computer_client.open_path, path_or_url=path)
 
 
 @_register_computer_tool(LOCAL)
@@ -395,7 +410,8 @@ def computer_focus_window(
 ) -> str:
     """Met une fenêtre au premier plan sous le jeton commun : seulement pour la montrer à Julien, jamais pour préparer
     une action (computer_look et computer_act travaillent sur une fenêtre recouverte)."""
-    return _format_computer_result(computer_client.focus_window, hwnd=hwnd, title=title, process_name=process_name)
+    with busy_indicator.working(hwnd or 0):
+        return _format_computer_result(computer_client.focus_window, hwnd=hwnd, title=title, process_name=process_name)
 
 
 @_register_legacy_computer_tool(READ_ONLY)
