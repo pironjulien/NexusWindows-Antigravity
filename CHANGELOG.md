@@ -9,6 +9,14 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+### Fixed
+- Emergency stop: the remaining time is now capped at the 120 s hold (floating-point rounding could report
+  120.00000000000003 s).
+
+### Changed
+- Development tools and CI actions updated: ruff 0.17.1, pyright 1.1.414, `actions/checkout` v7.0.1,
+  `astral-sh/setup-uv` v10.3.0 (pinned by hash).
+
 ## [2.10.0] - 2026-10-20 — "Agent at work" indicator
 
 ### Added
