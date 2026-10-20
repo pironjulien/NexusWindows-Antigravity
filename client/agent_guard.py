@@ -46,6 +46,11 @@ def mark(verified: Any, success: Any = None, already: bool | None = False) -> st
 def _alternative(error_type: str, message: str) -> str:
     low = message.lower()
     if error_type == "ConfirmationRequiredError" or "confirm=true" in low:
+        if "accord=" in low or "action sortante" in low:
+            return (
+                "action sortante : montre la description à Julien mot pour mot ; "
+                'après son oui, renvoie avec confirm=true et accord="<jeton>"'
+            )
         return (
             "irréversible : ordre explicite de Julien → confirm=true sur l'étape ; ton initiative → demande-lui d'abord"
         )

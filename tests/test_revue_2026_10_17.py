@@ -321,7 +321,18 @@ def test_b3_third_party_or_money_click_needs_confirm(monkeypatch, label):
     assert res["success"] is False and res["steps"][0]["error_type"] == "ConfirmationRequiredError"
     assert "confirm=true" in res["steps"][0]["error"] and "Julien" in res["steps"][0]["error"]
     clicked.assert_not_called()
-    res = computer_client.act([{"action": "click", "target": "#4", "confirm": True}], hwnd=TARGET, then="none")
+    outward = computer_client.outward_word(label, TARGET)
+    if outward:
+        token = res["steps"][0]["error"].rsplit('accord="', 1)[1].split('"', 1)[0]
+        res_retry = computer_client.act(
+            [{"action": "click", "target": "#4", "confirm": True}], hwnd=TARGET, then="none"
+        )
+        assert res_retry["success"] is False and "confirm=true alone" in res_retry["steps"][0]["error"]
+        res = computer_client.act(
+            [{"action": "click", "target": "#4", "confirm": True, "accord": token}], hwnd=TARGET, then="none"
+        )
+    else:
+        res = computer_client.act([{"action": "click", "target": "#4", "confirm": True}], hwnd=TARGET, then="none")
     assert res["success"] is True
     clicked.assert_called_once()
 
@@ -329,7 +340,7 @@ def test_b3_third_party_or_money_click_needs_confirm(monkeypatch, label):
 @pytest.mark.parametrize(
     "label",
     ["Valider", "Enregistrer", "Suivant", "Nom", "Éléments envoyés", "PayPal", "Annuler", "Supprimer",
-     "Supprimer l’élément", "Delete", "Transférer", "Confirmer", "S'abonner", "Subscribe", "Accepter", "Autoriser",
+     "Supprimer l’élément", "Delete", "Confirmer", "Accepter", "Autoriser",
      "Effacer tout", "Tout effacer", "Clear all", "Réinitialiser les filtres", "Reset", "Format"],
 )  # fmt: skip
 def test_b3_everything_else_needs_no_confirm(monkeypatch, label):
@@ -689,7 +700,12 @@ def test_b12_dead_files_and_chrome_bridge_leftovers_are_gone():
         assert not (REPO_ROOT / dead).exists(), dead  # fmt: skip
     leftovers = re.compile(r"9224|Ctrl\+(Maj|Shift)\+A|\.\.\\extension|bridge token|spotlight", re.IGNORECASE)
     for path in REPO_ROOT.rglob("*"):
-        if ".git" in path.parts or path.suffix not in {".py", ".ps1", ".md", ".json"} or path.name == "CHANGELOG.md":
+        if (
+            ".git" in path.parts
+            or "plugins-marketplace" in path.parts
+            or path.suffix not in {".py", ".ps1", ".md", ".json"}
+            or path.name == "CHANGELOG.md"
+        ):
             continue
         if path.name == Path(__file__).name:
             continue

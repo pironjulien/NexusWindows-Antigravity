@@ -516,3 +516,21 @@ def test_bench_open_list_scenario_and_verdict():
     bad = dict(good, task_ok=False, result="Résultat : …;Formule=;Envois=1", statuses_ok=False, statuses=["success"])
     failures = bench_gemini_task.verdict([bad], 2)
     assert len(failures) == 3 and "premier plan" in failures[-1]
+
+
+def test_resolve_step_target_supports_coordinates_and_box_2d():
+    step = {"action": "click", "target": "@250,300"}
+    idx, box = computer_client._resolve_step_target(step, 4242)
+    assert idx is None and box is None
+    assert step["x"] == 250 and step["y"] == 300
+    assert "coordonnées relatives" in step["_target_note"]
+
+    step_box = {"action": "click", "target": "box_2d:[100, 200, 300, 400]"}
+    idx, box = computer_client._resolve_step_target(step_box, 4242)
+    assert idx is None and box == [100, 200, 300, 400]
+
+    step_fallback = {"action": "click", "target": "Inconnu", "x": 100, "y": 200}
+    with patch.object(computer_client, "_find_by_label", return_value=(None, None)):
+        idx, box = computer_client._resolve_step_target(step_fallback, 4242)
+    assert idx is None and box is None
+    assert "repli visuel sur coordonnées" in step_fallback["_target_note"]

@@ -77,7 +77,10 @@ def test_enter_refused_when_default_button_sends(form, monkeypatch, keys):
     with pytest.raises(computer_client.ConfirmationRequiredError, match="bouton par défaut") as refused:
         computer_client.require_key_confirmation(f.parent, keys, False)
     assert "Envoyer" in str(refused.value) and "confirm=true" in str(refused.value)
-    computer_client.require_key_confirmation(f.parent, keys, True)  # oui explicite de Julien : passe
+    token = str(refused.value).rsplit('accord="', 1)[1].split('"', 1)[0]
+    with pytest.raises(computer_client.ConfirmationRequiredError, match="confirm=true alone"):
+        computer_client.require_key_confirmation(f.parent, keys, True)
+    computer_client.require_key_confirmation(f.parent, keys, True, accord=token)  # accord de Julien : passe
 
 
 @pytest.mark.parametrize("label", ["OK", "Enregistrer", "Valider", "Suivant"])
@@ -167,9 +170,12 @@ def _chat(monkeypatch, send_label: str) -> tuple:
 
 def test_enter_in_chat_composer_needs_confirm(monkeypatch):
     field = _chat(monkeypatch, "Envoyer")
-    with pytest.raises(computer_client.ConfirmationRequiredError, match="voisin du champ"):
+    with pytest.raises(computer_client.ConfirmationRequiredError, match="voisin du champ") as refused:
         computer_client.require_key_confirmation(TARGET, "enter", False, field)
-    computer_client.require_key_confirmation(TARGET, "enter", True, field)
+    token = str(refused.value).rsplit('accord="', 1)[1].split('"', 1)[0]
+    with pytest.raises(computer_client.ConfirmationRequiredError, match="confirm=true alone"):
+        computer_client.require_key_confirmation(TARGET, "enter", True, field)
+    computer_client.require_key_confirmation(TARGET, "enter", True, field, accord=token)
 
 
 def test_enter_in_field_far_from_send_button_is_free(monkeypatch):
@@ -215,10 +221,13 @@ def test_coordinate_click_on_drawn_pay_text_needs_confirm(monkeypatch):
                         lambda *a, **k: SimpleNamespace(status="ok", nodes=[root, group, text]))  # fmt: skip
     physical = MagicMock(return_value={"success": True, "verified": True})
     monkeypatch.setattr(computer_client, "_physical_point_click", physical)
-    with pytest.raises(computer_client.ConfirmationRequiredError, match="Payer"):
+    with pytest.raises(computer_client.ConfirmationRequiredError, match="Payer") as refused:
         computer_client.click(hwnd=TARGET, x=120, y=110, coords="screen")
     physical.assert_not_called()
-    computer_client.click(hwnd=TARGET, x=120, y=110, coords="screen", confirm=True)
+    token = str(refused.value).rsplit('accord="', 1)[1].split('"', 1)[0]
+    with pytest.raises(computer_client.ConfirmationRequiredError, match="confirm=true alone"):
+        computer_client.click(hwnd=TARGET, x=120, y=110, coords="screen", confirm=True)
+    computer_client.click(hwnd=TARGET, x=120, y=110, coords="screen", confirm=True, accord=token)
     physical.assert_called_once()
     assert computer_client._label_at(TARGET, 300, 300) == "Panier"  # ailleurs : rien à confirmer
 

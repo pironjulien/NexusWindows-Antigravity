@@ -238,7 +238,6 @@ def test_1_5_menus_refuse_partial_but_find_exact_with_ellipsis_or_shortcut(monke
         ("Supprimés", "TreeItem"),
         ("Supprimer", "ListItem"),  # élément de liste : sélectionner n'est pas supprimer
         ("Envoyer", "TabItem"),
-        ("Transférer", "MenuItem"),  # 2.7.0 : liste réduite à ce qui part chez un tiers ou coûte de l'argent
         ("Effacer tout", "Button"),
         ("Tout effacer", "MenuItem"),
         ("Supprimer", "Button"),
@@ -321,8 +320,10 @@ def test_emptying_the_confirm_list_disables_confirmation(monkeypatch):
 
 def test_confirm_list_is_third_party_money_or_irreversible():
     words = " ".join(computer_client.CONFIRM_PATTERNS)
-    for gone in ("abonner", "subscribe", "clear all"):  # 2.8.0 : désinstaller, formater… revenus (irréversibles)
+    for gone in ("clear all",):
         assert gone not in words, gone
+    assert "subscribe" in words
+    assert "abonn" in words
     assert computer_client.irreversible_word("Supprimer") == ""
     assert computer_client.irreversible_word("Supprimer définitivement") == "supprimer definitivement"
 

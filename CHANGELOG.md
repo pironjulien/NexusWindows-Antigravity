@@ -9,8 +9,22 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-10-20 — Exact-action consent, visual fallback, hardened supply chain
+
 ### Added
 
+- **Consent bound to the exact action** for outward gestures (paying, sending, publishing, transferring, calling):
+  besides `confirm: true`, a single-use `accord` token (10 minutes) returned by the first refusal, which describes
+  the exact action. It binds the tool, the gesture, the target, the actual contents of the window's editable fields
+  (read again at execution, passwords excluded) and the window; any change voids it. Also covers validation keys
+  (Enter, Ctrl+Enter, Space, Alt shortcuts), coordinate clicks and `type_text(submit=True)`. Local destructive
+  actions (permanent deletion, formatting, uninstalling, resetting) keep `confirm: true` alone.
+- **Visual fallback**: `target` accepts coordinates (`"@150,200"`, `"150, 200"`, `"coords:150,200"`) and Gemini
+  boxes (`"[ymin, xmin, ymax, xmax]"`, `"box_2d:[...]"`); a step whose label is missing from the UI Automation
+  tree falls back to its coordinates; `computer_look` says when a window exposes no UI Automation element.
+- Blind paste guard: a batch may not chain a paste (Ctrl+V) and a validation; the pasted text is read back first.
+- OpenSSF Scorecard workflow and badge; Dependabot for GitHub Actions and uv (7-day cooldown); GitHub Actions
+  pinned by commit SHA without persisted credentials (zizmor clean).
 - Every MCP tool has a readable `title` in its annotations, next to its four hints.
 - The server starts and lists its tools outside Windows (as MCP directories such as Glama check it, in a Linux
   container); there, each tool call answers that Windows is required. Windows-only dependencies (`comtypes`,

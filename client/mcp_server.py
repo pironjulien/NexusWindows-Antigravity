@@ -341,11 +341,12 @@ def computer_act(
     repeat: bool = False,
     then: str = "none",
     time_budget: float = 30.0,
+    accord: str | None = None,
 ) -> Any:
     """Agit en UN lot, en arrière-plan, sur une fenêtre NOMMÉE (hwnd), sans lire le code : jeton commun, arrêt d'urgence et pause de Julien gérés ici.
     Actions : click, double_click, right_click, type, set, clear, check, uncheck, select (option), expand, collapse, menu (path), key, scroll, drag, hover, wait (seconds, text), focus.
     Cible : target="Libellé exact", "#N", box_2d ou x/y ; libellé ambigu refusé avec les candidats. Étapes ✓ = ~ ✗, status = la pire ; suivre `next`.
-    Payer, envoyer, publier, supprimer définitivement, désinstaller, formater, réinitialiser, résilier (et la touche Entrée qui les déclencherait) : `confirm: true` sur l'étape ; ordre explicite de Julien = confirmation, ton initiative = demander d'abord. Même lot sans computer_look : refusé.
+    Actions sortantes (payer, envoyer, publier, transférer, et la touche Entrée qui les déclencherait) : `confirm: true` ET `accord: "<jeton>"` (sur l'étape ou en paramètre) rendu par le premier refus qui décrit l'action exacte. Destructions locales (supprimer définitivement, désinstaller, formater, réinitialiser) : `confirm: true` seul. Ordre explicite de Julien = confirmation, ton initiative = demander d'abord. Même lot sans computer_look : refusé.
     foreground=True : vraie souris/clavier en repli seulement.
     Exemple : {"hwnd": "Commande", "steps": [{"action": "set", "target": "Nom", "text": "Julien"}, {"action": "check", "target": "Accepter"}, {"action": "click", "target": "Valider"}]}"""
     return _computer_action(
@@ -354,7 +355,7 @@ def computer_act(
         {"steps": steps, "foreground": foreground},
         repeat,
         lambda window: computer_client.act(
-            steps=steps, hwnd=window, then=then, foreground=foreground, time_budget=time_budget
+            steps=steps, hwnd=window, then=then, foreground=foreground, time_budget=time_budget, accord=accord
         ),
     )
 

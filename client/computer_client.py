@@ -349,12 +349,14 @@ class _PhysicalPolicy:
     lot (jeton commun tenu sans trou, fenêtre devant, premier plan rendu à la fin) n'est prise qu'au PREMIER geste
     physique réellement nécessaire : un lot que l'arrière-plan suffit à faire ne touche jamais au premier plan."""
 
-    def __init__(self, allow: bool, target_hwnd: int = 0, lot: bool = False) -> None:
+    def __init__(self, allow: bool, target_hwnd: int = 0, lot: bool = False, accord: str = "") -> None:
         self.allow = allow
         self.target_hwnd = target_hwnd
         self.lot_wanted = lot
         self.lot_guard: Any = None
         self.physical_steps = 0
+        self.accord = accord
+        self.approved: set[str] = set()
 
 
 def _current_policy() -> _PhysicalPolicy | None:
@@ -615,6 +617,38 @@ def irreversible_word(label: Any) -> str:
     return found.group(0) if found else ""
 
 
+_ACCORDS: garde_fous.Accords | None = None
+_ACCORDS_LOCK = threading.Lock()
+
+
+def get_accords() -> garde_fous.Accords:
+    """Registre unique des accords liés à l'action exacte et des textes lus (provenance)."""
+    global _ACCORDS
+    with _ACCORDS_LOCK:
+        if _ACCORDS is None:
+            _ACCORDS = garde_fous.Accords()
+        return _ACCORDS
+
+
+def outward_word(label: Any, hwnd: int = 0) -> str:
+    """Mot sortant pour ce libellé (envoyer, appeler, payer, publier, transférer...) : exige confirm=true ET accord.
+    « » sinon (geste libre, ou destruction locale : confirm=true seul)."""
+    if not CONFIRM_PATTERNS:
+        return ""
+    word = garde_fous.irreversible_word(label, garde_fous.outward_patterns())
+    if word or not hwnd:
+        return word
+    plain = _plain(label)
+    title = _window_title_plain(hwnd)
+    for context, verbs, what in CONTEXT_CONFIRM:
+        if "paiement" not in what:
+            continue
+        found = re.search(r"\b(" + verbs + r")\b", plain)
+        if found and re.search(r"\b(" + context + r")\b", title):
+            return f"{found.group(0)} (fenêtre de {what})"
+    return ""
+
+
 def _window_title_plain(hwnd: int) -> str:
     """Titre de la fenêtre, en texte comparable (« » si elle a disparu)."""
     if not hwnd or not user32.IsWindow(hwnd):
@@ -622,6 +656,72 @@ def _window_title_plain(hwnd: int) -> str:
     buf = ctypes.create_unicode_buffer(512)
     user32.GetWindowTextW(hwnd, buf, 512)
     return _plain(buf.value)
+
+
+def _window_title_raw(hwnd: int) -> str:
+    """Titre brut de la fenêtre, sans normalisation (« » si elle a disparu)."""
+    if not hwnd or not user32.IsWindow(hwnd):
+        return ""
+    buf = ctypes.create_unicode_buffer(512)
+    user32.GetWindowTextW(hwnd, buf, 512)
+    return buf.value.strip()
+
+
+def _window_process_name(hwnd: int) -> str:
+    """Nom du processus exécutable de la fenêtre."""
+    if not hwnd or not user32.IsWindow(hwnd):
+        return ""
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    try:
+        return get_process_image_path(pid.value)[1]
+    except Exception:
+        return ""
+
+
+def field_contents(target_hwnd: int) -> list[str]:
+    """« nom: valeur » des champs éditables de la fenêtre (Edit, Document), triés.
+    Le contenu que l'accord lie (destinataire, objet, corps). Jamais un mot de passe."""
+    if not target_hwnd or not user32.IsWindow(target_hwnd):
+        return []
+    fields: list[str] = []
+    if uia_fast is not None:
+        try:
+            tree = _window_tree(target_hwnd, max_nodes=MAX_UIA_NODES, time_budget=1.5)
+            for node in tree.nodes:
+                if node.control_type not in ("Edit", "Document"):
+                    continue
+                if node.props.get("password") or is_password_field(
+                    {
+                        "name": node.name,
+                        "props": node.props,
+                        "hwnd": node.props.get("hwnd"),
+                        "type": node.control_type,
+                    }
+                ):
+                    continue
+                val = node.props.get("value")
+                if not str(val or "").strip() and node.props.get("hwnd"):
+                    own_h = int(node.props.get("hwnd") or 0)
+                    if own_h and user32.IsWindow(own_h):
+                        val = win32_controls.get_text(own_h)
+                val_str = " ".join(str(val or "").split())
+                if val_str:
+                    name_str = node.name or str(node.props.get("automation_id") or "").strip() or "champ"
+                    fields.append(f"{name_str}: {val_str}")
+        except Exception:
+            pass
+    if not fields and win32_controls.family(target_hwnd) in win32_controls.NATIVE_FAMILIES:
+        for child in win32_controls.child_windows(target_hwnd):
+            if win32_controls.is_class(child, win32_controls.EDIT_CLASSES) and not win32_controls.is_password_edit(
+                child
+            ):
+                text = (win32_controls.get_text(child) or "").strip()
+                if text:
+                    entry = f"champ: {text}"
+                    if entry not in fields:
+                        fields.append(entry)
+    return sorted(fields)
 
 
 def confirm_word(label: Any, hwnd: int = 0) -> str:
@@ -638,20 +738,57 @@ def confirm_word(label: Any, hwnd: int = 0) -> str:
     return ""
 
 
-def require_confirmation(label: Any, confirm: bool, what: str = "action", role: str = "", hwnd: int = 0) -> None:
-    """Refuse, sauf confirm=true, une action dont la cible est un élément d'action au libellé de CONFIRM_PATTERNS
-    (payer, envoyer, publier, supprimer définitivement, désinstaller, formater…) ou, avec `hwnd`, au verbe générique
-    d'une fenêtre de paiement ou de formatage (CONTEXT_CONFIRM). `role` : type UIA de la cible (un élément de liste,
-    d'arbre, un onglet ou un champ n'est jamais concerné). NEXUS_AGY_CONFIRM=off : jamais."""
-    if confirm or str(role or "") in NON_ACTION_ROLES or not confirmation_enabled():
+def require_confirmation(
+    label: Any,
+    confirm: bool,
+    what: str = "action",
+    role: str = "",
+    hwnd: int = 0,
+    accord: str = "",
+    approved: set[str] | None = None,
+) -> None:
+    """Refuse une action critique :
+    - Geste SORTANT (payer, envoyer, publier, transférer...) : exige confirm=true ET accord=<jeton>
+      lié à l'action exacte (outil, geste, cible, contenu des champs éditables, contexte).
+    - Destruction locale (supprimer définitivement, désinstaller, formater, réinitialiser...) :
+      confirm=true seul suffit.
+    NEXUS_AGY_CONFIRM=off désactive toute confirmation."""
+    if str(role or "") in NON_ACTION_ROLES or not confirmation_enabled():
         return
-    word = confirm_word(label, hwnd)
-    if word:
-        raise ConfirmationRequiredError(
-            f"{what} sur « {str(label).strip()[:60]} » : irréversible ou chez un tiers (« {word} »), rien "
-            "n'a été fait. Julien l'a demandé explicitement : renvoyer cette étape avec confirm=true ; sinon (ton "
-            "initiative), lui demander d'abord son oui."
+    outward = outward_word(label, hwnd)
+    if outward:
+        content_lines = field_contents(hwnd)
+        title = _window_title_raw(hwnd) or _window_title_plain(hwnd)
+        proc = _window_process_name(hwnd)
+        context_str = f"{proc} — {title}" if proc and title else (proc or title)
+        act_desc = garde_fous.action(
+            "windows",
+            what,
+            str(label).strip(),
+            content="\n".join(content_lines),
+            context=context_str,
         )
+        fp = garde_fous.fingerprint(act_desc)
+        if approved is not None and fp in approved:
+            return
+        acc = get_accords()
+        answer = acc.check(act_desc, confirm, accord)
+        if not answer:
+            if approved is not None:
+                approved.add(fp)
+            return
+        raise ConfirmationRequiredError(
+            f"{what} sur « {str(label).strip()[:60]} » : action sortante (« {outward} »).\n"
+            f"Julien doit valider cette action exacte :\n{answer}"
+        )
+    if not confirm:
+        word = confirm_word(label, hwnd)
+        if word:
+            raise ConfirmationRequiredError(
+                f"{what} sur « {str(label).strip()[:60]} » : irréversible ou chez un tiers (« {word} »), rien "
+                "n'a été fait. Julien l'a demandé explicitement : renvoyer cette étape avec confirm=true ; sinon (ton "
+                "initiative), lui demander d'abord son oui."
+            )
 
 
 # Touches qui déclenchent une action : la confirmation porte sur CE QU'ELLES DÉCLENCHERAIENT, sinon Entrée
@@ -783,20 +920,57 @@ def _key_triggers(target_hwnd: int, field: Any, kind: str) -> list[tuple[str, st
     return out
 
 
-def require_key_confirmation(target_hwnd: int, keys: str, confirm: bool, field: Any = None) -> None:
-    """Refuse, sauf confirm=true, une touche qui déclencherait une action à confirmer (bouton au focus, bouton par
-    défaut, bouton d'envoi voisin du champ, raccourci Alt d'un bouton). NEXUS_AGY_CONFIRM=off : jamais."""
+def require_key_confirmation(
+    target_hwnd: int,
+    keys: str,
+    confirm: bool,
+    field: Any = None,
+    accord: str = "",
+    approved: set[str] | None = None,
+) -> None:
+    """Refuse une touche qui déclencherait une action critique (bouton au focus, bouton par défaut,
+    bouton d'envoi voisin du champ, raccourci Alt d'un bouton).
+    - Geste sortant : confirm=true ET accord=<jeton> lié à l'action exacte.
+    - Destruction locale : confirm=true seul.
+    NEXUS_AGY_CONFIRM=off : jamais."""
     kind = _key_kind(keys)
-    if confirm or not kind or not CONFIRM_PATTERNS or not confirmation_enabled():
+    if not kind or not CONFIRM_PATTERNS or not confirmation_enabled():
         return
     for label, source in _key_triggers(target_hwnd, field, kind):
-        word = confirm_word(label, target_hwnd)
-        if word:
-            raise ConfirmationRequiredError(
-                f"touche « {keys} » : déclencherait « {label.strip()[:60]} » ({source}), irréversible ou chez un "
-                f"tiers (« {word} ») ; rien n'a été fait. Julien l'a demandé explicitement : renvoyer cette étape avec "
-                "confirm=true ; sinon (ton initiative), lui demander d'abord son oui."
+        outward = outward_word(label, target_hwnd)
+        if outward:
+            content_lines = field_contents(target_hwnd)
+            title = _window_title_raw(target_hwnd) or _window_title_plain(target_hwnd)
+            proc = _window_process_name(target_hwnd)
+            context_str = f"{proc} — {title}" if proc and title else (proc or title)
+            act_desc = garde_fous.action(
+                "windows",
+                f"touche « {keys} »",
+                f"{str(label).strip()} ({source})",
+                content="\n".join(content_lines),
+                context=context_str,
             )
+            fp = garde_fous.fingerprint(act_desc)
+            if approved is not None and fp in approved:
+                continue
+            acc = get_accords()
+            answer = acc.check(act_desc, confirm, accord)
+            if not answer:
+                if approved is not None:
+                    approved.add(fp)
+                continue
+            raise ConfirmationRequiredError(
+                f"touche « {keys} » : déclencherait « {label.strip()[:60]} » ({source}), action sortante (« {outward} »).\n"
+                f"Julien doit valider cette action exacte :\n{answer}"
+            )
+        if not confirm:
+            word = confirm_word(label, target_hwnd)
+            if word:
+                raise ConfirmationRequiredError(
+                    f"touche « {keys} » : déclencherait « {label.strip()[:60]} » ({source}), irréversible ou chez un "
+                    f"tiers (« {word} ») ; rien n'a été fait. Julien l'a demandé explicitement : renvoyer cette étape avec "
+                    "confirm=true ; sinon (ton initiative), lui demander d'abord son oui."
+                )
 
 
 # -----------------------------------------------------------------------------
@@ -3092,6 +3266,8 @@ def click(
     restore_focus: bool = True,
     coords: str = "auto",
     confirm: bool = False,
+    accord: str = "",
+    approved: set[str] | None = None,
 ) -> dict[str, Any]:
     """Clicks an element by index [#N], Gemini box_2d [ymin, xmin, ymax, xmax], or relative coords (x, y).
 
@@ -3099,7 +3275,7 @@ def click(
     (arbre UIA, fenêtre recouverte comprise), puis techniques d'arrière-plan selon la famille (messages Win32, UI
     Automation), effet relu. Un clic sur un champ de saisie le RETIENT pour la saisie suivante (aucun clic envoyé).
     Vraie souris seulement en repli et avec foreground=True ; sinon refus explicite (NeedsForegroundError).
-    Cible au libellé de CONFIRM_PATTERNS (Envoyer, Payer, Publier…) : refus sans confirm=true (ConfirmationRequiredError)."""
+    Geste sortant (Envoyer, Payer, Publier…) : refus sans confirm=true ET accord (ConfirmationRequiredError)."""
     t0 = time.perf_counter()
     emergency_stop.check()
     ensure_default_desktop()
@@ -3124,13 +3300,26 @@ def click(
         hit = _hit_test(target_hwnd, sx, sy)
         if hit is None:
             # Aucun contrôle interactif sous le point : le texte lu là (bouton dessiné, div web) compte quand même.
-            require_confirmation(_label_at(target_hwnd, sx, sy), confirm, "clic par coordonnées", hwnd=target_hwnd)
+            require_confirmation(
+                _label_at(target_hwnd, sx, sy),
+                confirm,
+                "clic par coordonnées",
+                hwnd=target_hwnd,
+                accord=accord,
+                approved=approved,
+            )
             return _physical_point_click(target_hwnd, sx, sy, aim, origin, button, click_count, restore_focus,
                                          foreground, t0)  # fmt: skip
         ctrl, info = hit
         origin["hit_test"] = _describe(info)
     require_confirmation(
-        info.get("name") or getattr(ctrl, "Name", "") or "", confirm, "clic", str(info.get("type") or ""), target_hwnd
+        info.get("name") or getattr(ctrl, "Name", "") or "",
+        confirm,
+        "clic",
+        str(info.get("type") or ""),
+        target_hwnd,
+        accord=accord,
+        approved=approved,
     )
     return _click_element(target_hwnd, ctrl, info, element_index, point, origin, button, click_count, restore_focus,
                           foreground, t0)  # fmt: skip
@@ -3424,6 +3613,8 @@ def type_text(
     restore_clipboard: bool = True,
     restore_focus: bool = True,
     confirm: bool = False,
+    accord: str = "",
+    approved: set[str] | None = None,
 ) -> dict[str, Any]:
     """Saisit du texte, en arrière-plan d'abord, valeur relue (égalité exacte, espaces normalisés). Champ mot de
     passe : rempli comme les autres (contenu remplacé), valeur masquée jamais relue ni rendue (effet ~ à vérifier).
@@ -3440,12 +3631,14 @@ def type_text(
     - 'typing' : frappe caractère par caractère via SendInput Unicode (interrompue si Julien reprend la main).
     submit=True : Entrée après la saisie ; restore_focus=True : premier plan et curseur rendus à Julien.
     Entrée (submit, ou retour à la ligne tapé) qui déclencherait « Envoyer », « Payer »… : refus avant toute saisie
-    sans confirm=true (ConfirmationRequiredError), comme le clic.
+    sans confirm=true et accord éventuel (ConfirmationRequiredError), comme le clic.
     """
     t0 = time.perf_counter()
     emergency_stop.check()
     ensure_default_desktop()
     target_hwnd = resolve_window(hwnd)
+    if approved is None:
+        approved = set()
 
     # Security check: Block typing into critical Windows auth/system surfaces
     is_protected, reason = is_protected_system_window(target_hwnd)
@@ -3478,7 +3671,9 @@ def type_text(
             clear_first = clear_first or bool(designated.get("replace"))
             source = "champ retenu"
     if submit:  # avant toute saisie : rien n'est tapé si Entrée doit être confirmée
-        require_key_confirmation(target_hwnd, "enter", confirm, (ctrl, info) if ctrl is not None else None)
+        require_key_confirmation(
+            target_hwnd, "enter", confirm, (ctrl, info) if ctrl is not None else None, accord=accord, approved=approved
+        )
     secret = ctrl is not None and is_password_field(info)
     if secret:
         clear_first = True  # valeur masquée : on ne sait pas ce qu'elle contient, jamais d'ajout à l'aveugle
@@ -3519,8 +3714,17 @@ def type_text(
                 result["focus_stolen_restored"] = True
             if submit and out["verified"] is not False:
                 try:
-                    key = press_key("enter", hwnd=target_hwnd, foreground=foreground, restore_focus=restore_focus,
-                                    verify=False, field=(ctrl, info), confirm=True)  # fmt: skip
+                    key = press_key(
+                        "enter",
+                        hwnd=target_hwnd,
+                        foreground=foreground,
+                        restore_focus=restore_focus,
+                        verify=False,
+                        field=(ctrl, info),
+                        confirm=True,
+                        accord=accord,
+                        approved=approved,
+                    )
                 except NeedsForegroundError as error:
                     raise NeedsForegroundError(
                         f"Texte saisi et relu, mais Entrée non envoyée : {error}",
@@ -3544,7 +3748,9 @@ def type_text(
     if method not in ("paste", "typing"):
         method = "paste" if ("\n" in text or len(text) > PASTE_MIN_CHARS) else "typing"
     if method == "typing" and "\n" in text and not submit:  # chaque retour à la ligne tapé est une vraie Entrée
-        require_key_confirmation(target_hwnd, "enter", confirm, (ctrl, info) if ctrl is not None else None)
+        require_key_confirmation(
+            target_hwnd, "enter", confirm, (ctrl, info) if ctrl is not None else None, accord=accord, approved=approved
+        )
     if point is None and ctrl is not None:
         crect = ctrl.BoundingRectangle
         point = ((crect.left + crect.right) // 2, (crect.top + crect.bottom) // 2)
@@ -3812,11 +4018,13 @@ def press_key(
     field: Any = None,
     background: bool = True,
     confirm: bool = False,
+    accord: str = "",
+    approved: set[str] | None = None,
 ) -> dict[str, Any]:
     """Presses key combination (e.g. 'ctrl+c', 'alt+f4', 'win+r', 'enter', 'ctrl+,').
 
     Entrée / Espace qui déclencheraient « Envoyer », « Payer »… (bouton au focus, bouton par défaut, bouton d'envoi
-    voisin du champ) : refus sans confirm=true (ConfirmationRequiredError), comme le clic.
+    voisin du champ) : refus sans confirm=true ET accord (ConfirmationRequiredError), comme le clic.
 
     Arrière-plan d'abord : Ctrl+A / Ctrl+V / Effacer sur le champ retenu par un clic (traduits en saisie d'arrière-plan
     relue), touche simple postée en Win32, WinForms et WPF. Vraie touche (SendInput) en repli, foreground=True
@@ -3834,7 +4042,7 @@ def press_key(
     is_protected, reason = is_protected_system_window(target_hwnd)
     if is_protected:
         raise PermissionError(f"Touches interdites sur {reason}.")
-    require_key_confirmation(target_hwnd, keys, confirm, field)
+    require_key_confirmation(target_hwnd, keys, confirm, field, accord=accord, approved=approved)
 
     if background and target_hwnd and user32.IsWindow(target_hwnd):
         out = _background_keys(target_hwnd, keys, parts, vk_entries, field)
@@ -4435,6 +4643,8 @@ def select_option(
     target: Any = None,
     box_2d: Any = None,
     confirm: bool = False,
+    accord: str = "",
+    approved: set[str] | None = None,
 ) -> dict[str, Any]:
     """Choisit une option d'une liste déroulante ou d'une liste, en arrière-plan, sélection relue. Une option est un
     élément de liste (choix réversible) : jamais de confirm exigé (NON_ACTION_ROLES ; `confirm` transmis au clic).
@@ -4453,8 +4663,8 @@ def select_option(
     kind = _native_kind(own)
     if info.get("type") == "ListItem":  # option visée directement : c'est un clic sur elle
         if element_index is None:
-            return click(hwnd=target_hwnd, box_2d=box_2d, confirm=confirm)
-        return click(hwnd=target_hwnd, element_index=element_index, confirm=confirm)
+            return click(hwnd=target_hwnd, box_2d=box_2d, confirm=confirm, accord=accord, approved=approved)
+        return click(hwnd=target_hwnd, element_index=element_index, confirm=confirm, accord=accord, approved=approved)
 
     chain: list[tuple[str, Callable[[], Any]]] = []
     if fam in win32_controls.NATIVE_FAMILIES and kind == "combo":
@@ -4538,9 +4748,15 @@ def _find_menu_item(hwnds: list[int], label: str) -> Any:
     return None
 
 
-def menu_command(path: str, hwnd: int | str | None = None, confirm: bool = False) -> dict[str, Any]:
+def menu_command(
+    path: str,
+    hwnd: int | str | None = None,
+    confirm: bool = False,
+    accord: str = "",
+    approved: set[str] | None = None,
+) -> dict[str, Any]:
     """Commande de menu par son chemin (« Fichier > Enregistrer ») ; commande au libellé de CONFIRM_PATTERNS (Envoyer,
-    Publier…) : confirm=true exigé.
+    Publier…) : confirm=true exigé (et accord si action sortante).
 
     Win32 (barre HMENU) : WM_COMMAND avec l'identifiant de l'élément, sans ouvrir le menu. Sinon UIA : chaque niveau
     ouvert (Expand) puis le dernier invoqué. Effet relu sur la fenêtre (titre, fenêtres, image) ; `expect` d'act pour
@@ -4555,7 +4771,9 @@ def menu_command(path: str, hwnd: int | str | None = None, confirm: bool = False
     segments = [p.strip() for p in path.replace("/", ">").split(">") if p.strip()]
     if not segments:
         raise ValueError("Chemin de menu vide.")
-    require_confirmation(segments[-1], confirm, "commande de menu", "MenuItem", target_hwnd)
+    require_confirmation(
+        segments[-1], confirm, "commande de menu", "MenuItem", target_hwnd, accord=accord, approved=approved
+    )
 
     def uia_menu() -> str:
         if uia_fast is None:
@@ -4779,6 +4997,12 @@ def format_look(state: dict[str, Any]) -> str:
         f"{state.get('element_count', len(state.get('elements') or []))} éléments · UIA {uia.get('status', '?')}"
     )
     lines = [head, 'cible : target="libellé exact", "#N", ou x/y (@x,y ci-dessous) ; box_2d d\'après l\'image']
+    if not (state.get("elements") or []):
+        lines.append(
+            "[Mode visuel / repli actif] Aucun élément UI Automation exposé par cette fenêtre. "
+            "Ciblez directement par box_2d [ymin, xmin, ymax, xmax] (d'après l'image WebP jointe) ou "
+            'coordonnées relatives target="@x,y" (avec foreground=true).'
+        )
     for el in state.get("elements") or []:
         parts = [f"[{el.get('index')}]", str(el.get("type") or "?")]
         if el.get("name"):
@@ -4940,8 +5164,16 @@ def _resolve_step_target(
         elif isinstance(target, str):
             t_str = target.strip()
             marked = re.fullmatch(r"(?:#|\[)\s*(\d+)\s*\]?", t_str)
+            box_match = re.fullmatch(r"(?:box_2d:)?\s*\[\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]", t_str)
+            coords_match = re.fullmatch(r"(?:@|coords:|x=)?\s*(\d+)\s*(?:,|\s*,\s*|x|\s*y=)\s*(\d+)", t_str)
             if marked:
                 element_index = int(marked.group(1))
+            elif box_match:
+                box_2d = [int(box_match.group(i)) for i in range(1, 5)]
+            elif coords_match:
+                s["x"] = int(coords_match.group(1))
+                s["y"] = int(coords_match.group(2))
+                s["_target_note"] = f"coordonnées relatives ({s['x']}, {s['y']})"
             elif t_str.isdigit():
                 element_index = int(t_str)
             else:
@@ -4955,10 +5187,18 @@ def _resolve_step_target(
                     get_window_state(hwnd=target_hwnd, max_elements=200)
                     found, note = _find_by_label(t_str, action)
                 if found is None:
-                    raise ValueError(f"Élément cible '{target}' introuvable dans la fenêtre.")
-                element_index = found
-                if note:
-                    s["_target_note"] = note
+                    if s.get("x") is not None and s.get("y") is not None:
+                        s["_target_note"] = (
+                            f"libellé '{target}' absent de l'arbre UIA, repli visuel sur coordonnées ({s['x']}, {s['y']})"
+                        )
+                    elif s.get("box_2d") is not None:
+                        s["_target_note"] = f"libellé '{target}' absent de l'arbre UIA, repli visuel sur box_2d"
+                    else:
+                        raise ValueError(f"Élément cible '{target}' introuvable dans la fenêtre.")
+                else:
+                    element_index = found
+                    if note:
+                        s["_target_note"] = note
     return element_index, box_2d
 
 
@@ -5032,13 +5272,26 @@ def _wait_step(s: dict[str, Any], target_hwnd: int) -> dict[str, Any]:
 
 
 def _run_act_step(
-    action: str, s: dict[str, Any], target_hwnd: int, foreground: bool, step_index: int
+    action: str,
+    s: dict[str, Any],
+    target_hwnd: int,
+    foreground: bool,
+    step_index: int,
 ) -> dict[str, Any]:
     """Exécute une étape d'act et renvoie son résultat (lève en cas d'échec). `confirm` de l'étape : seulement après
     un « oui » explicite de Julien pour une action de CONFIRM_PATTERNS (payer, envoyer, publier…)."""
     confirm = s.get("confirm") is True
+    policy = _current_policy()
+    step_accord = str(s.get("accord") or (policy.accord if policy is not None else "") or "").strip()
+    approved = policy.approved if policy is not None else None
     if action == "menu":
-        return menu_command(path=str(s.get("path") or s.get("target") or ""), hwnd=target_hwnd, confirm=confirm)
+        return menu_command(
+            path=str(s.get("path") or s.get("target") or ""),
+            hwnd=target_hwnd,
+            confirm=confirm,
+            accord=step_accord,
+            approved=approved,
+        )
     if action in ("wait", "sleep"):
         return _wait_step(s, target_hwnd)
     element_index, box_2d = _resolve_step_target(s, target_hwnd)
@@ -5060,6 +5313,8 @@ def _run_act_step(
             restore_focus=restore,
             coords=coords,
             confirm=confirm,
+            accord=step_accord,
+            approved=approved,
         )
     if action in ("type", "paste", "type_text"):
         return type_text(
@@ -5075,6 +5330,8 @@ def _run_act_step(
             foreground=foreground,
             restore_focus=restore,
             confirm=confirm,
+            accord=step_accord,
+            approved=approved,
         )
     if action in ("set", "set_value"):
         return type_text(
@@ -5089,6 +5346,9 @@ def _run_act_step(
             method=str(s.get("method", "auto")),
             foreground=foreground,
             restore_focus=restore,
+            confirm=confirm,
+            accord=step_accord,
+            approved=approved,
         )
     if action == "clear":
         if element_index is not None:
@@ -5101,9 +5361,29 @@ def _run_act_step(
                 method="auto",
                 foreground=foreground,
                 restore_focus=restore,
+                confirm=confirm,
+                accord=step_accord,
+                approved=approved,
             )
-        press_key("ctrl+a", hwnd=target_hwnd, foreground=foreground, restore_focus=restore, verify=False)
-        return press_key("backspace", hwnd=target_hwnd, foreground=foreground, restore_focus=restore)
+        press_key(
+            "ctrl+a",
+            hwnd=target_hwnd,
+            foreground=foreground,
+            restore_focus=restore,
+            verify=False,
+            confirm=confirm,
+            accord=step_accord,
+            approved=approved,
+        )
+        return press_key(
+            "backspace",
+            hwnd=target_hwnd,
+            foreground=foreground,
+            restore_focus=restore,
+            confirm=confirm,
+            accord=step_accord,
+            approved=approved,
+        )
     if action in ("check", "uncheck"):
         return set_checked(hwnd=target_hwnd, element_index=element_index, checked=action == "check", box_2d=box_2d)
     if action in ("expand", "collapse"):
@@ -5112,17 +5392,35 @@ def _run_act_step(
         option = s.get("option") or s.get("value") or s.get("text")
         if option is None:
             raise ValueError(f"Étape {step_index} : 'option' est requise pour select.")
-        return select_option(str(option), hwnd=target_hwnd, element_index=element_index, box_2d=box_2d, confirm=confirm)
+        return select_option(
+            str(option),
+            hwnd=target_hwnd,
+            element_index=element_index,
+            box_2d=box_2d,
+            confirm=confirm,
+            accord=step_accord,
+            approved=approved,
+        )
     if action in ("key", "press_key", "hotkey"):
         if element_index is not None:  # touche visée sur un élément nommé « Envoyer »… : même règle que le clic
             info = _element_info.get(element_index, {})
-            require_confirmation(info.get("name") or "", confirm, "touche", str(info.get("type") or ""), target_hwnd)
+            require_confirmation(
+                info.get("name") or "",
+                confirm,
+                "touche",
+                str(info.get("type") or ""),
+                target_hwnd,
+                accord=step_accord,
+                approved=approved,
+            )
         return press_key(
             keys=s.get("key") or s.get("keys") or "",
             hwnd=target_hwnd,
             foreground=foreground,
             restore_focus=restore,
             confirm=confirm,
+            accord=step_accord,
+            approved=approved,
         )
     if action == "scroll":
         return scroll(
@@ -5196,6 +5494,7 @@ def act(
     then: str = "state",
     foreground: bool = False,
     time_budget: float = 30.0,
+    accord: str | None = None,
 ) -> dict[str, Any]:
     """Exécute un lot d'actions en un seul appel, en arrière-plan d'abord.
 
@@ -5224,12 +5523,19 @@ def act(
     if is_protected:
         raise PermissionError(f"Action interdite sur {reason}. Rien n'a été fait.")
 
+    blind_paste_err = garde_fous.check_blind_paste(steps)
+    if blind_paste_err:
+        raise ValueError(blind_paste_err)
+
     results: list[dict[str, Any]] = []
     failure: str | None = None
     uncertain: list[int] = []
     interrupted = False
 
-    policy = _PhysicalPolicy(allow=bool(foreground), target_hwnd=target_hwnd, lot=bool(foreground and target_hwnd))
+    default_accord = str(accord or "").strip()
+    policy = _PhysicalPolicy(
+        allow=bool(foreground), target_hwnd=target_hwnd, lot=bool(foreground and target_hwnd), accord=default_accord
+    )
     previous_policy = _current_policy()
     _policy_local.current = policy
     try:
