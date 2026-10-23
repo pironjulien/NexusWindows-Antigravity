@@ -356,7 +356,7 @@ _policy_local = threading.local()
 
 
 class _PhysicalPolicy:
-    """Politique d'un lot computer_act : `allow` = vraie souris/clavier permis en repli (foreground=True). La garde du
+    """Politique d'un lot act : `allow` = vraie souris/clavier permis en repli (foreground=True). La garde du
     lot (jeton commun tenu sans trou, fenêtre devant, premier plan rendu à la fin) n'est prise qu'au PREMIER geste
     physique réellement nécessaire : un lot que l'arrière-plan suffit à faire ne touche jamais au premier plan."""
 
@@ -456,7 +456,7 @@ def _physical_gate(target_hwnd: int, foreground: bool, what: str) -> None:
         return
     policy.physical_steps += 1
     if policy.lot_wanted and policy.lot_guard is None and policy.target_hwnd:
-        guard = FocusGuard(policy.target_hwnd, restore=True, purpose="lot au premier plan (computer_act)")
+        guard = FocusGuard(policy.target_hwnd, restore=True, purpose="lot au premier plan (act)")
         guard.__enter__()
         policy.lot_guard = guard
 
@@ -1526,7 +1526,7 @@ def list_apps() -> list[dict[str, Any]]:
 
 
 WINDOW_UNNAMED = (
-    "Fenêtre non précisée : indiquer hwnd (numéro de computer_list_windows, titre ou processus). La fenêtre de devant "
+    "Fenêtre non précisée : indiquer hwnd (numéro de windows, titre ou processus). La fenêtre de devant "
     "n'est jamais prise par défaut (c'est souvent Antigravity elle-même ou la fenêtre de travail de Julien)."
 )
 
@@ -1683,15 +1683,38 @@ def _activate_window(target_hwnd: int) -> bool:
 # -----------------------------------------------------------------------------
 # Screen & Window Capture (Anti-Crash 400 Guaranteed < 200 KB)
 # -----------------------------------------------------------------------------
-def cleanup_screenshot_cache(max_files: int = 50, max_age_hours: float = 24.0) -> int:
-    """Prunes older screenshots (WebP du bureau, PNG du navigateur) from ~/.nexusagy/screenshots to prevent disk bloat."""
-    cache_dir = Path.home() / ".nexusagy" / "screenshots"
+SCREENSHOT_KEEP = 50  # captures gardées au plus (README : « at most 50 »)
+SCREENSHOT_MAX_AGE_H = 24.0  # âge maximal d'une capture
+
+
+def screenshot_dir() -> Path:
+    """Dossier local (hors OneDrive) des captures écrites par défaut."""
+    return Path.home() / ".nexusagy" / "screenshots"
+
+
+def save_screenshot(data: bytes, prefix: str) -> Path:
+    """Écrit une capture dans screenshot_dir() PUIS nettoie : jamais plus de SCREENSHOT_KEEP fichiers ensuite
+    (nettoyer avant l'écriture en laissait SCREENSHOT_KEEP + 1, relecture de Codex du 23/10)."""
+    cache_dir = screenshot_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    dest = cache_dir / f"{prefix}_{int(time.time() * 1000)}.webp"
+    dest.write_bytes(data)
+    cleanup_screenshot_cache(cache_dir=cache_dir)
+    return dest.resolve()
+
+
+def cleanup_screenshot_cache(
+    max_files: int = SCREENSHOT_KEEP, max_age_hours: float = SCREENSHOT_MAX_AGE_H, cache_dir: Path | None = None
+) -> int:
+    """Prunes older screenshots (WebP du bureau, PNG du navigateur) from ~/.nexusagy/screenshots to prevent disk bloat.
+    Appelé après chaque capture écrite et au démarrage du serveur."""
+    cache_dir = cache_dir or screenshot_dir()
     if not cache_dir.exists():
         return 0
     try:
         files = sorted(
             [*cache_dir.glob("*.webp"), *cache_dir.glob("*.png")],
-            key=lambda p: p.stat().st_mtime,
+            key=lambda p: (p.stat().st_mtime, p.name),
         )
         now = time.time()
         deleted = 0
@@ -1933,7 +1956,7 @@ def open_path(path_or_url: str) -> dict[str, Any]:
     else:
         result["message"] = (
             f"~ ouverture non vérifiée : aucune fenêtre de {app or 'l’application associée'} portant le nom relue en "
-            f"{OPEN_WAIT_S:g} s ; aucune fenêtre désignée, vérifier (computer_list_windows)."
+            f"{OPEN_WAIT_S:g} s ; aucune fenêtre désignée, vérifier (windows)."
         )
     if stolen:
         result["focus_stolen_restored"] = True
@@ -2649,17 +2672,12 @@ def get_window_state(
         result["image_dimensions"] = meta.get("captured_size")
         result["scale_factor"] = meta.get("scale_factor")
 
-        dest_path = output_path
-        if not dest_path:
-            cache_dir = Path.home() / ".nexusagy" / "screenshots"
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            cleanup_screenshot_cache(max_files=50, max_age_hours=24.0)
-            timestamp = int(time.time() * 1000)
-            dest_path = str(cache_dir / f"window_state_{timestamp}.webp")
-
-        dest = Path(dest_path).expanduser().resolve()
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(webp_bytes)
+        if output_path:
+            dest = Path(output_path).expanduser().resolve()
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(webp_bytes)
+        else:
+            dest = save_screenshot(webp_bytes, "window_state")
         result["screenshot_path"] = str(dest)
 
         if include_data_url:
@@ -3739,7 +3757,7 @@ def _click_element(
                 result["message"] = (
                     f"Invoke envoyé sans retour après {INVOKE_TIMEOUT_S:g} s (souvent une fenêtre modale "
                     "ouverte) : aucun clic physique enchaîné pour éviter une double activation. "
-                    "Relire l'état (computer_look) avant de poursuivre."
+                    "Relire l'état (look) avant de poursuivre."
                 )
             elif out["verified"] is None:
                 result["message"] = "Commande envoyée sans effet visible relu : vérifier sur l'image."
@@ -4996,7 +5014,7 @@ def set_expanded(
     envoyé si l'état est déjà le bon (`already`).
 
     Liste déroulante Win32/WinForms : CB_SHOWDROPDOWN relu par CB_GETDROPPEDSTATE (ses options apparaissent ensuite
-    dans computer_look). Sinon UIA ExpandCollapse."""
+    dans look). Sinon UIA ExpandCollapse."""
     t0 = time.perf_counter()
     emergency_stop.check()
     target_hwnd = resolve_window(hwnd)
@@ -6072,6 +6090,38 @@ def _exact_postcondition(expect: dict[str, Any]) -> bool:
     return bool(keys) and keys <= EXACT_EXPECT_KEYS
 
 
+_LABEL_KEYS = {"element", "target", "match"}  # libellés visés (permis au journal), jamais un texte saisi ou attendu
+
+
+def _masked_texts(value: Any) -> Any:
+    """Postcondition ou état observé pour le journal sur disque : chaque texte (valeur attendue, valeur lue, titre)
+    remplacé par sa longueur ; libellés visés, booléens et nombres gardés. La réponse à l'agent garde les valeurs."""
+    if isinstance(value, dict):
+        return {k: (v if k in _LABEL_KEYS else _masked_texts(v)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_masked_texts(v) for v in value]
+    if isinstance(value, str):
+        return f"<{len(value)} car.>"
+    return value
+
+
+def _private_texts(step: dict[str, Any]) -> list[str]:
+    """Textes saisis ou attendus d'une étape : `text` et les textes de `expect` hors libellés visés."""
+    out = [step.get("text")]
+    expect = step.get("expect")
+    if isinstance(expect, dict):
+        out += [v for k, v in expect.items() if k not in _LABEL_KEYS]
+    return [v for v in out if isinstance(v, str) and v]
+
+
+def _redacted(step: dict[str, Any], message: str) -> str:
+    """Message d'erreur pour le journal sur disque : textes saisis ou attendus de l'étape remplacés par leur longueur
+    (un refus d'accord résume le texte saisi)."""
+    for value in sorted(_private_texts(step), key=len, reverse=True):
+        message = message.replace(value, f"<{len(value)} car.>")
+    return message
+
+
 def act(
     steps: list[dict[str, Any]],
     hwnd: int | str | None = None,
@@ -6114,6 +6164,7 @@ def act(
 
     results: list[dict[str, Any]] = []
     failure: str | None = None
+    failure_logged: str | None = None  # même message pour le journal sur disque : textes saisis/attendus masqués
     uncertain: list[int] = []
     interrupted = False
 
@@ -6126,7 +6177,7 @@ def act(
     try:
         for i, s in enumerate(steps):
             if (time.perf_counter() - t0) > time_budget:
-                failure = f"Budget de temps de {time_budget} s dépassé avant l'étape {i}"
+                failure = failure_logged = f"Budget de temps de {time_budget} s dépassé avant l'étape {i}"
                 results.append({"step": i, "status": "timeout", "mark": agent_guard.MARK_FAIL, "message": failure})
                 break
 
@@ -6157,6 +6208,7 @@ def act(
                         step_res.pop("already", None)  # l'état du contrôle ne prouve pas la postcondition finale
             except Exception as error:  # noqa: BLE001 - le compte rendu des étapes déjà faites ne doit pas se perdre
                 failure = f"Étape {i} ({action or '?'}) : {error}"
+                failure_logged = _redacted(s, failure)
                 interrupted = isinstance(error, UserInterruptError)
                 results.append(
                     {
@@ -6198,6 +6250,12 @@ def act(
                 failure = f"Étape {i} ({action}) : échec relu" + (
                     f" (attendu {expect}, observé {step_res.get('expect', {}).get('observed')})" if expect else ""
                 )
+                failure_logged = f"Étape {i} ({action}) : échec relu" + (
+                    f" (attendu {_masked_texts(expect)}, observé "
+                    f"{_masked_texts(step_res.get('expect', {}).get('observed'))})"
+                    if expect
+                    else ""
+                )
                 break
             if status == "unverified":
                 break  # l'effet précédent doit être établi avant d'envoyer une autre action
@@ -6213,7 +6271,7 @@ def act(
         target_hwnd,
         elapsed,
         "FAILURE" if failure else ("UNVERIFIED" if uncertain else "SUCCESS"),
-        {"steps_count": len(steps), "executed": len(results), "error": failure},
+        {"steps_count": len(steps), "executed": len(results), "error": failure_logged},
     )
 
     res: dict[str, Any] = {
@@ -6236,7 +6294,7 @@ def act(
         res["unverified_steps"] = uncertain
         res["warning"] = (
             "Lot arrêté sur un effet non établi : la suite n'a pas été envoyée. "
-            "Regarder l'image jointe ou computer_look avant toute reprise ; ajouter une postcondition 'expect' si utile."
+            "Regarder l'image jointe ou look avant toute reprise ; ajouter une postcondition 'expect' si utile."
         )
     res["next"] = agent_guard.next_for_act(res)
 

@@ -1,11 +1,11 @@
 ---
 name: nexus-computer
-description: Piloter le bureau Windows et ses applications en arrière-plan (computer_look puis computer_act en un lot, cibles par libellé ; chaque réponse dit quoi faire ensuite).
+description: Piloter le bureau Windows et ses applications en arrière-plan (look puis act en un lot, cibles par libellé ; chaque réponse dit quoi faire ensuite).
 ---
 
-# NexusAGY Computer (v2.11.0)
+# NexusAGY Computer (v3.0.0)
 
-**RÈGLE D'OR : `computer_look` → `computer_act` en UN lot avec des cibles par libellé ; ne jamais renvoyer un lot sans avoir regardé.**
+**RÈGLE D'OR : `look` → `act` en UN lot avec des cibles par libellé ; ne jamais renvoyer un lot sans avoir regardé.**
 
 Agir directement, sans lire le code : jeton commun, arrêt d'urgence, pause de Julien et restitution de son premier plan sont gérés par chaque outil.
 
@@ -13,22 +13,22 @@ Agir directement, sans lire le code : jeton commun, arrêt d'urgence, pause de J
 
 | Situation | Outil |
 |---|---|
-| Trouver la fenêtre | `computer_list_windows()` (`by_app=true` : par application) |
-| Voir une fenêtre, même recouverte | `computer_look(hwnd="titre, processus ou numéro")` : une ligne par élément + image jointe |
-| Remplir, cocher, choisir, cliquer, menu | `computer_act(hwnd=..., steps=[...])`, `target="Libellé"` |
+| Trouver la fenêtre | `windows()` (`by_app=true` : par application) |
+| Voir une fenêtre, même recouverte | `look(hwnd="titre, processus ou numéro")` : une ligne par élément + image jointe |
+| Remplir, cocher, choisir, cliquer, menu | `act(hwnd=..., steps=[...])`, `target="Libellé"` |
 | La cible n'a pas de libellé, seule l'image la montre | étape avec `box_2d` [ymin, xmin, ymax, xmax] (0-1000, d'après l'image), ou `x`/`y` (le `@x,y` du regard) |
-| Réponse `~` ou `✗` | regarder l'image jointe (ou `computer_look`), corriger, renvoyer seulement la suite |
-| Réponse `refused` (✗, rien fait) | `computer_look` d'abord ; `repeat=true` seulement si le renvoi est voulu |
+| Réponse `~` ou `✗` | regarder l'image jointe (ou `look`), corriger, renvoyer seulement la suite |
+| Réponse `refused` (✗, rien fait) | `look` d'abord ; `repeat=true` seulement si le renvoi est voulu |
 | Réponse `needs_foreground` | autre cible par libellé ; sinon `foreground=true` (vraie souris/clavier en repli) |
 | Réponse `needs_confirmation` | ordre explicite de Julien pour ce geste : renvoyer l'étape avec `"confirm": true` ; sinon (ton initiative) lui demander d'abord |
-| Ouvrir un document, un dossier, un programme, un script ou un raccourci | `computer_open_path(path=...)` (ouverture relue ; une URL : nexus-browser) |
-| Fermer une fenêtre | `computer_close_window(hwnd=...)` |
+| Ouvrir un document, un dossier, un programme, un script ou un raccourci | `launch(app=...)` (ouverture relue ; une URL : nexus-browser) |
+| Fermer une fenêtre | `window(action="close", hwnd=...)` |
 
 **Toujours nommer la fenêtre** (`hwnd`) : sans elle, tout est refusé (jamais la fenêtre de devant, souvent Antigravity). Titre qui désigne plusieurs fenêtres : refus avec la liste → reprendre le numéro.
 
 ## Lire le regard
 
-`computer_look` rend une ligne par élément : `[N] rôle « nom » = « valeur » états @x,y` (états : ☑ ☐ coché ou non, `sélectionné`, `désactivé`, `liste ouverte` ; `@x,y` = point dans la fenêtre, à passer tel quel en `x`/`y`). `format="json"` : même contenu en JSON compact, avec `box_2d` par élément.
+`look` rend une ligne par élément : `[N] rôle « nom » = « valeur » états @x,y` (états : ☑ ☐ coché ou non, `sélectionné`, `désactivé`, `liste ouverte` ; `@x,y` = point dans la fenêtre, à passer tel quel en `x`/`y`). `format="json"` : même contenu en JSON compact, avec `box_2d` par élément.
 
 ## Lire la réponse d'une action
 
@@ -53,7 +53,7 @@ Agir directement, sans lire le code : jeton commun, arrêt d'urgence, pause de J
 - Actions : `click`, `double_click`, `right_click`, `type` (ajoute), `set` (remplace), `clear`, `check`, `uncheck`, `select` (`option`), `expand`, `collapse` (liste déroulante, nœud), `menu` (`path`: "Fichier > Enregistrer"), `key` (`key`: "enter"), `scroll`, `drag`, `hover`, `wait`, `focus`.
 - Cible : `target` = libellé visible exact (préféré), `"#N"` du dernier look, `box_2d` ou `x`/`y` ; valable pour toutes les actions (`check`, `select`, `expand` compris). Un point visé est rapporté à l'élément qu'il désigne et traité en arrière-plan.
 - **Libellé ambigu = refus** avec la liste des candidats (`[N] « nom » rôle`) : renvoyer avec `"#N"`. Un libellé trouvé seulement en partie est accepté s'il est seul, et signalé (`target_note`).
-- Liste déroulante : `select` + `option` en une étape ; ou `click`/`expand` sur la liste, `computer_look` (ses options apparaissent), puis `click` sur l'option.
+- Liste déroulante : `select` + `option` en une étape ; ou `click`/`expand` sur la liste, `look` (ses options apparaissent), puis `click` sur l'option.
 - `click` sur un champ le retient : un `type` sans cible y écrit ensuite (un `key` "ctrl+a" entre les deux fait remplacer le texte ; ✓ seulement si la sélection est relue, sinon ~). Mieux : `set` avec `target`.
 - `expect` (facultatif), évalué APRÈS l'étape : `{"element": "...", "value"|"contains"|"checked"|"selected"|"exists": ...}` ou `{"title"|"title_contains": "..."}`. Faux après → ✗. Étape sautée (=) seulement si `value`, `checked`, `selected` ou `title` est déjà exactement vrai avant (jamais sur `exists` ni `contains`).
 - `scroll` : `delta_y` (crans, positif = vers le haut) sur une cible défilante (`target`) en arrière-plan ; à la molette (repli `foreground=true`) un point est obligatoire (`target` ou `x`/`y`).
@@ -81,4 +81,4 @@ Agir directement, sans lire le code : jeton commun, arrêt d'urgence, pause de J
 
 ## Anciens noms (toujours appelables, non listés)
 
-`computer_click`, `computer_type_text`, `computer_press_key`, `computer_scroll`, `computer_drag`, `computer_mouse_move`, `computer_get_window_state`, `computer_take_screenshot`, `computer_focus_window`, `computer_list_apps` : mêmes garanties (`next`, garde anti-répétition, arrière-plan d'abord, `foreground=false` par défaut). Préférer `computer_look` et `computer_act`.
+`computer_click`, `computer_type_text`, `computer_press_key`, `computer_scroll`, `computer_drag`, `computer_mouse_move`, `computer_get_window_state`, `computer_take_screenshot`, `computer_focus_window`, `computer_list_apps` : mêmes garanties (`next`, garde anti-répétition, arrière-plan d'abord, `foreground=false` par défaut). Anciens noms `computer_look`, `computer_act`, `computer_list_windows`, `computer_open_path`, `computer_close_window` : toujours appelables. Préférer `look` et `act`.

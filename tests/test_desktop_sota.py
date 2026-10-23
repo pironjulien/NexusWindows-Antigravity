@@ -6,6 +6,7 @@ Hors ligne : les fenêtres Win32 de ces tests sont créées dans ce processus, j
 
 import ctypes
 import json
+import os
 import sys
 import time
 from ctypes import wintypes
@@ -1078,3 +1079,84 @@ def test_posted_bn_clicked_without_read_effect_is_unknown_and_stops_the_chain():
     chain = [("BN_CLICKED", lambda: calls.append("bn") or "bn_clicked"), ("UIA Invoke", lambda: calls.append("uia"))]
     out = computer_client._run_chain(chain, lambda _d: (False, "état inchangé"), 0)
     assert calls == ["bn"] and out["technique"] == "BN_CLICKED" and out["verified"] is None
+
+
+# --- Relecture de Codex du 23/10 : promesses de confidentialité du README -------------------------------------------
+def _act_log(directory: Path) -> str:
+    log = directory / "computer.log"
+    return log.read_text(encoding="utf-8") if log.exists() else ""
+
+
+def test_act_failure_logs_lengths_not_expected_or_observed_text(monkeypatch, isolated_computer_log):
+    """`set` avec expect.value non atteint : la réponse garde attendu/observé (utile au modèle), le journal sur disque
+    n'a que leurs longueurs (README : « never the typed text »)."""
+    monkeypatch.setattr(computer_client, "_run_act_step", lambda *a: {"success": None, "verified": None})
+    monkeypatch.setattr(computer_client, "check_expect", lambda h, e: (False, {"value": "", "match": "exact"}))
+    monkeypatch.setattr(
+        computer_client, "wait_expect", lambda h, e: (False, {"value": "OBSERVE-SENTINEL", "match": "exact"})
+    )
+    res = computer_client.act(
+        steps=[
+            {"action": "set", "target": "Nom", "text": "SENTINEL", "expect": {"element": "Nom", "value": "SENTINEL"}}
+        ],  # fmt: skip
+        hwnd=1,
+        then="none",
+    )
+    assert res["success"] is False and "SENTINEL" in res["error"]
+    log = _act_log(isolated_computer_log)
+    assert "[ACT]" in log and "SENTINEL" not in log
+    assert "<8 car.>" in log and "Nom" in log
+    observed = computer_client._masked_texts({"value": "OBSERVE-SENTINEL", "match": "exact", "exists": True})
+    assert observed == {"value": "<16 car.>", "match": "exact", "exists": True}
+
+
+def test_act_step_error_logged_without_typed_text(monkeypatch, isolated_computer_log):
+    def refuse(*_a):
+        raise ValueError("Envoi refusé sans accord : typed: SENTINEL")
+
+    monkeypatch.setattr(computer_client, "_run_act_step", refuse)
+    res = computer_client.act(steps=[{"action": "type", "target": "Message", "text": "SENTINEL"}], hwnd=1, then="none")
+    assert "SENTINEL" in res["error"]
+    log = _act_log(isolated_computer_log)
+    assert "[ACT]" in log and "SENTINEL" not in log and "<8 car.>" in log
+
+
+def test_screenshots_never_exceed_keep_after_write(monkeypatch, tmp_path):
+    """Nettoyer AVANT d'écrire laissait 51 captures : écrire puis nettoyer en garde 50 au plus, dont la nouvelle."""
+    monkeypatch.setattr(computer_client, "screenshot_dir", lambda: tmp_path)
+    now = time.time()
+    for n in range(computer_client.SCREENSHOT_KEEP):
+        old = tmp_path / f"screenshot_{n:04d}.webp"
+        old.write_bytes(b"x")
+        os.utime(old, (now - 3600 + n, now - 3600 + n))
+    stale = tmp_path / "screenshot_stale.png"
+    stale.write_bytes(b"x")
+    os.utime(stale, (now - 25 * 3600, now - 25 * 3600))
+    dest = computer_client.save_screenshot(b"new", "screenshot")
+    files = sorted(tmp_path.iterdir())
+    assert len(files) == computer_client.SCREENSHOT_KEEP
+    assert dest.exists() and not stale.exists()
+
+
+def test_server_start_purges_old_screenshots(monkeypatch):
+    calls = []
+    monkeypatch.setattr(computer_client, "cleanup_screenshot_cache", lambda *a, **k: calls.append(1) or 0)
+    monkeypatch.setattr(mcp_server.computer_mcp, "run", lambda **k: None)
+    monkeypatch.setattr(mcp_server.emergency_stop, "start", lambda: None)
+    monkeypatch.setattr(mcp_server.physical_input, "start", lambda: None)
+    mcp_server.main([])
+    assert calls == [1]
+
+
+def test_server_starts_off_windows_without_touching_the_client(monkeypatch):
+    """Hors Windows (annuaires MCP, conteneur Linux) : le client est un bouchon, le serveur démarre quand même."""
+    ran = []
+
+    def refuse(*a, **k):
+        raise RuntimeError("Windows requis")
+
+    monkeypatch.setattr(mcp_server.sys, "platform", "linux")
+    monkeypatch.setattr(computer_client, "cleanup_screenshot_cache", refuse)
+    monkeypatch.setattr(mcp_server.computer_mcp, "run", lambda **k: ran.append(k))
+    mcp_server.main([])
+    assert ran == [{"transport": "stdio"}]

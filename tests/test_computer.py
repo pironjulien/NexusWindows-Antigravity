@@ -117,9 +117,11 @@ def test_mcp_server_computer_tools():
 def test_mcp_modular_scopes():
     computer_tools = [t.name for t in mcp_server.computer_mcp._tool_manager.list_tools()]
 
-    assert len(computer_tools) == 15  # enregistrés (appelables), dont 10 alias non listés
-    assert len(mcp_server.listed_tool_names(mcp_server.computer_mcp)) == 5  # ce que Gemini voit
-    assert all(name.startswith("computer_") for name in computer_tools)
+    # 5 noms communs listés (windows, look, act, launch, window) + 15 noms computer_… appelables, non listés
+    common = {"windows", "look", "act", "launch", "window"}
+    assert len(computer_tools) == 20
+    assert set(mcp_server.listed_tool_names(mcp_server.computer_mcp)) == common  # ce que Gemini voit
+    assert all(name.startswith("computer_") for name in set(computer_tools) - common)
     assert not hasattr(mcp_server, "browser_mcp")
 
 
@@ -733,7 +735,7 @@ def test_act_foreground_holds_token_for_whole_batch_and_hands_back():
         assert res["physical_steps"] == 2
         assert events == [
             ("step", 0),  # arrière-plan d'abord : aucune garde
-            ("enter", 4242, True, "lot au premier plan (computer_act)"),  # premier geste physique
+            ("enter", 4242, True, "lot au premier plan (act)"),  # premier geste physique
             ("step", 1),
             ("step", 2),  # même garde, jeton tenu sans trou
             ("exit",),
@@ -745,7 +747,7 @@ def test_act_foreground_holds_token_for_whole_batch_and_hands_back():
             [{"action": "click", "physical": True, "boom": True}], hwnd=4242, then="none", foreground=True
         )
         assert res["success"] is False
-        assert events == [("enter", 4242, True, "lot au premier plan (computer_act)"), ("step", 0), ("exit",)]
+        assert events == [("enter", 4242, True, "lot au premier plan (act)"), ("step", 0), ("exit",)]
 
         events.clear()
         res = computer_client.act([{"action": "click"}], hwnd=4242, then="none", foreground=True)

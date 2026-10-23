@@ -1,23 +1,26 @@
 # NexusWindows for Antigravity
 
+<!-- mcp-name: io.github.pironjulien/nexus-windows-antigravity -->
+
 [![Release](https://img.shields.io/github/v/release/pironjulien/NexusWindows-Antigravity)](https://github.com/pironjulien/NexusWindows-Antigravity/releases)
 [![Tests](https://github.com/pironjulien/NexusWindows-Antigravity/actions/workflows/tests.yml/badge.svg)](https://github.com/pironjulien/NexusWindows-Antigravity/actions/workflows/tests.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/pironjulien/NexusWindows-Antigravity/badge)](https://scorecard.dev/viewer/?uri=github.com/pironjulien/NexusWindows-Antigravity)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](https://github.com/pironjulien/NexusWindows-Antigravity/blob/main/LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/nexus-windows-antigravity)](https://pypi.org/project/nexus-windows-antigravity/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)](https://github.com/pironjulien/NexusWindows-Antigravity/blob/main/pyproject.toml)
 [![MCP](https://img.shields.io/badge/MCP-server-7ee2a8)](https://modelcontextprotocol.io)
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4)](#install)
 
-[![NexusWindows: Windows computer use for AI agents, in the background. Works with Claude, Codex and Antigravity.](docs/assets/banner.webp)](https://julienpiron.fr/nexuswindows/)
+[![NexusWindows: Windows computer use for AI agents, in the background. Works with Claude, Codex and Antigravity.](https://raw.githubusercontent.com/pironjulien/NexusWindows-Antigravity/main/docs/assets/banner.webp)](https://julienpiron.fr/nexuswindows/)
 
-![NexusWindows for Antigravity: an AI agent fills and submits a form through computer_act in a window that stays behind another one, five steps read back](docs/assets/demo.webp)
+![NexusWindows for Antigravity: an AI agent fills and submits a form through act in a window that stays behind another one, five steps read back](https://raw.githubusercontent.com/pironjulien/NexusWindows-Antigravity/main/docs/assets/demo.webp)
 
 **Windows computer use for Antigravity, in the background.** An MCP server (`nexus-computer`) that lets Google
 Antigravity (Gemini) see and operate Windows desktop applications while the user keeps their mouse, keyboard and
 foreground window. Built for a fast model: one look, then one batch of steps with label targets, and every reply
 says what to do next.
 
-Version 2.10.1 · Windows 10/11 · Python 3.10+ · MIT licence
+Version 3.0.0 · Windows 10/11 · Python 3.11+ · MIT licence
 
 Part of the Nexus family: [NexusWindows](https://julienpiron.fr/nexuswindows/)
 ([Claude](https://github.com/pironjulien/NexusWindows-Claude) ·
@@ -34,18 +37,69 @@ to stop working while the agent acts. Most Windows applications can be driven wi
 window messages and modern frameworks expose UI Automation. This server acts in the background first, reads the
 effect back, and only falls back to the real mouse or keyboard when the step allows it (`foreground=True`).
 
+## NexusWindows family
+
+Three MCP servers, one per agent, built separately because each model needs its tools shaped for it, with the same
+promise: the user keeps their mouse, keyboard and foreground window, and every action is read back.
+
+| | Claude | Codex | Antigravity |
+|---|---|---|---|
+| Install | `uvx --python 3.14 nexus-windows` | `npx -y nexus-windows-codex` | `uvx --python 3.14 nexus-windows-antigravity` |
+| Package | [PyPI](https://pypi.org/project/nexus-windows/) | [npm](https://www.npmjs.com/package/nexus-windows-codex) | [PyPI](https://pypi.org/project/nexus-windows-antigravity/) |
+| Tools | `windows` `look` `act` `launch` `window`, plus `notifications` and `logs` | `windows` `look` `act` `launch` `window` | `windows` `look` `act` `launch` `window` |
+| Repository | [NexusWindows-Claude](https://github.com/pironjulien/NexusWindows-Claude) | [NexusWindows-Codex](https://github.com/pironjulien/NexusWindows-Codex) | [NexusWindows-Antigravity](https://github.com/pironjulien/NexusWindows-Antigravity) |
+
+Every step reports ✓ verified, = already done, ~ unknown (never replayed) or ✗ failed or refused. The three share the
+guardrail policy, the foreground token, the emergency stop (Ctrl+Alt+Shift+Esc), a common journal format and a common
+bench.
+
+## Installation
+
+Requirements: Windows 10 or 11, [uv](https://docs.astral.sh/uv/) (`winget install astral-sh.uv`).
+
+From [PyPI](https://pypi.org/project/nexus-windows-antigravity/), no clone needed: declare the server in
+Antigravity's `mcp_config.json` (`%USERPROFILE%\.gemini\config\mcp_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "nexus-computer": {
+      "command": "uvx",
+      "args": ["--python", "3.14", "nexus-windows-antigravity"],
+      "env": { "PYTHONUTF8": "1" }
+    }
+  }
+}
+```
+
+The agent guide that teaches Antigravity the five tools is
+[`SKILL.md`](https://github.com/pironjulien/NexusWindows-Antigravity/blob/main/plugins/nexus-computer/skills/nexus-computer/SKILL.md): copy the
+`plugins/nexus-computer` folder into Antigravity's plugins to install it with the server.
+
+From a clone (development), with PowerShell 7:
+
+```powershell
+git clone https://github.com/pironjulien/NexusWindows-Antigravity.git
+cd NexusWindows-Antigravity
+pwsh -NoProfile -File install.ps1
+```
+
+The Python environment, logs and screenshots then live in `%USERPROFILE%\.nexusagy` (outside the clone), and the
+server is declared with `"command": "pwsh"`, `"args": ["-NoProfile", "-File",
+"C:/path/to/NexusWindows-Antigravity/scripts/start-computer-mcp.ps1"]`.
+
 ## Tools
 
-Five listed MCP tools; the ten older names (`computer_click`, `computer_type_text`...) stay callable as unlisted
-aliases.
+Five listed MCP tools, named like the other NexusWindows tools (Claude, Codex); the older names (`look`,
+`computer_act`, `computer_click`...) stay callable as unlisted aliases.
 
 | Tool | Purpose |
 | --- | --- |
-| `computer_list_windows` | Application windows (`by_app=true`: grouped by application) |
-| `computer_look` | One line per element `[N] role « name » = « value » states @x,y`, plus an image, without bringing the window forward |
-| `computer_act` | Several steps in one call (click, type, check, uncheck, select, menu, keys...), each read back |
-| `computer_open_path` | Open a document, folder, program, script or shortcut; the opening is read back |
-| `computer_close_window` | Close a window (UI Automation, then `WM_CLOSE`) |
+| `windows` | Application windows (`by_app=true`: grouped by application) |
+| `look` | One line per element `[N] role « name » = « value » states @x,y`, plus an image, without bringing the window forward |
+| `act` | Several steps in one call (click, type, check, uncheck, select, menu, keys...), each read back: ✓ = ~ ✗ |
+| `launch` | Open an application, document, folder, script or shortcut; the opening is read back |
+| `window` | `action="close"`: close a window (UI Automation, then `WM_CLOSE`) |
 
 Tool descriptions and replies are in French; tool and parameter names are in English.
 
@@ -54,7 +108,7 @@ Tool descriptions and replies are in French; tool and parameter names are in Eng
 - **Designed for Gemini**: golden rule *look, then act in one batch with label targets*; every action reply carries
   a one-line `next` (✓ done · = already done, do not redo · ~ effect not seen, look at the attached image · ✗ failure,
   cause and what to try) and, when the effect was not read back, a compact WebP image (≤ 1280 px) of the window. A
-  batch identical to one sent in the last 10 s on the same window without a `computer_look` in between is
+  batch identical to one sent in the last 10 s on the same window without a `look` in between is
   **refused** (`repeat=true` forces it).
 - **Background first, even with `foreground=True`**: a `box_2d` or (x, y) target is mapped to the element under the
   point in the window's own UI Automation tree (covered windows included) and handled like a label target; a click on
@@ -86,7 +140,7 @@ Tool descriptions and replies are in French; tool and parameter names are in Eng
   `NEXUS_AGY_CONFIRM=off` in the MCP server environment turns confirmation off entirely (default: on).
 - **Clipboard**: saved in all its formats and restored; the text put there is excluded from Win+V history and cloud
   clipboard. Used only as a last resort for typing (multi-line or more than 300 characters).
-- **Agent at work**: while an action runs (`computer_act`, opening, closing, focusing and the action aliases; never
+- **Agent at work**: while an action runs (`act`, opening, closing, focusing and the action aliases; never
   the reads), a small logo spins on itself in the bottom-right corner of the driven window's screen, like a game
   loading screen, with a breathing blue halo, and goes away 1.6 s after the last action. Always on top, borderless,
   click-through, never activated, absent from the taskbar and excluded from screen captures (`busy_indicator.py`).
@@ -107,43 +161,6 @@ Tool descriptions and replies are in French; tool and parameter names are in Eng
 | `plugins/nexus-computer/` | Antigravity plugin and the agent guide (`SKILL.md`) |
 | `tests/` | Unit tests (pytest) and the real desktop validation |
 
-## Install
-
-Requirements: Windows 10 or 11, PowerShell 7, [uv](https://docs.astral.sh/uv/) (installed by `install.ps1` through
-winget if missing).
-
-```powershell
-git clone https://github.com/pironjulien/NexusWindows-Antigravity.git
-cd NexusWindows-Antigravity
-pwsh -NoProfile -File install.ps1
-```
-
-The Python environment, logs and screenshots live in `%USERPROFILE%\.nexusagy` (outside the clone). Then declare
-the server in Antigravity's `mcp_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "nexus-computer": {
-      "command": "pwsh",
-      "args": ["-NoProfile", "-File", "C:/path/to/NexusWindows-Antigravity/scripts/start-computer-mcp.ps1"]
-    }
-  }
-}
-```
-
-The agent guide is `plugins/nexus-computer/skills/nexus-computer/SKILL.md`.
-
-## Checks
-
-```powershell
-pwsh -NoProfile -File test.ps1         # offline: ruff, Pyright, pytest
-pwsh -NoProfile -File test.ps1 -Full   # plus the real desktop validation on its own Win32, WinForms and WPF windows
-```
-
-The real validation shows its test windows without activation and closes them at the end; real mouse and keyboard
-checks run only when the PC has been idle for 120 s, otherwise they are reported as skipped.
-
 ## Privacy
 
 NexusWindows for Antigravity runs entirely on your PC. It has no account, no telemetry, no analytics and makes no
@@ -153,10 +170,12 @@ network requests of its own.
   in, only when a tool is called. Password managers are neither read nor driven.
 - **Where it goes**: tool results are returned to Antigravity, which may send them to Google under its own privacy
   policy; this server sends nothing anywhere else.
-- **What it stores**, under `~/.nexusagy/`: the Python environment, an action log `computer.log` (action, method,
+- **What it stores**, under `~/.nexusagy/`: the Python environment (clone install only; `uvx` keeps its own in the
+  uv cache), an action log `computer.log` (action, method,
   window, duration, outcome and short details such as a target label, coordinates, key names, a menu path or the
-  number of characters typed, never the typed text; rotated at 5 MB, three backups) and screenshots (at most 50,
-  each kept under 24 hours). Under `~/.nexus/`: the shared foreground token and emergency-stop state.
+  number of characters typed, never the typed or expected text; rotated at 5 MB, three backups) and screenshots (at
+  most 50 after each capture; those older than 24 hours are purged at the next capture and at server start, so a
+  stopped server can leave its last screenshots until it starts again). Under `~/.nexus/`: the shared foreground token and emergency-stop state.
   Under `%LOCALAPPDATA%\NexusJournal\windows\antigravity\` (or `NEXUS_JOURNAL_HOME`): a short monthly JSONL journal,
   in the same format as the other NexusWindows tools (app executable name, action, technique, outcome, duration,
   whether the foreground was used, and the first words of an error, cut before any quote, colon or bracket); never
@@ -169,10 +188,21 @@ Questions or concerns: open an issue on this repository.
 ## Limits
 
 - Windows only. Tool descriptions, replies and code comments are in French.
-- Keyboard input is refused in UWP/WinUI and Chromium, and Ctrl/Alt shortcuts in WPF, where it cannot be done in the
-  background; for web pages, [NexusBrowser](https://github.com/pironjulien/NexusBrowser) is more reliable.
+- In the background, keyboard input is refused in UWP/WinUI, Firefox and Tk, and Ctrl/Alt shortcuts in WPF;
+  Chromium/Electron receives keys, shortcuts and typing through a simulated activation, checked by read-back (`~` if
+  nothing changes). For web pages, [NexusBrowser](https://github.com/pironjulien/NexusBrowser) is more reliable.
 - An effect with nothing readable stays `~` (not verified).
+
+## Development
+
+```powershell
+pwsh -NoProfile -File test.ps1         # offline: ruff, Pyright, pytest
+pwsh -NoProfile -File test.ps1 -Full   # plus the real desktop validation on its own Win32, WinForms and WPF windows
+```
+
+The real validation shows its test windows without activation and closes them at the end; real mouse and keyboard
+checks run only when the PC has been idle for 120 s, otherwise they are reported as skipped.
 
 ## Licence
 
-MIT, see [LICENSE](LICENSE). Copyright (c) 2026 Julien Piron.
+MIT, see [LICENSE](https://github.com/pironjulien/NexusWindows-Antigravity/blob/main/LICENSE). Copyright (c) 2026 Julien Piron.

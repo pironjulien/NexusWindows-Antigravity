@@ -1,16 +1,54 @@
 [project]
-name = "nexus-agy"
-version = "2.11.0"
-description = "Computer Use Windows pour Google Antigravity (le pont Chrome vit dans NexusBrowser)"
-requires-python = ">=3.10"
+name = "nexus-windows-antigravity"
+version = "3.0.0"
+description = "NexusWindows for Antigravity: Windows computer use in the background for Google Antigravity (MCP server)."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Julien Piron" }]
+requires-python = ">=3.11"
+keywords = ["mcp", "model-context-protocol", "windows", "computer-use", "ui-automation", "antigravity", "gemini"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: Developers",
+    "Operating System :: Microsoft :: Windows :: Windows 10",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Programming Language :: Python :: 3",
+    "Topic :: Desktop Environment",
+    "Topic :: Software Development :: Testing",
+]
 dependencies = [
     "comtypes>=1.4.17,<2; sys_platform == 'win32'",
     "mcp>=2.3.0,<3",
     "mss>=9.0,<11",
-    "pillow>=12.3,<13",
+    "pillow>=13.0.0,<14",
     "uiautomation>=2.0,<3; sys_platform == 'win32'",
     "websocket-client>=1.8,<2",
 ]
+
+[project.urls]
+Homepage = "https://julienpiron.fr/nexuswindows/antigravity/"
+Repository = "https://github.com/pironjulien/NexusWindows-Antigravity"
+Changelog = "https://github.com/pironjulien/NexusWindows-Antigravity/blob/main/CHANGELOG.md"
+Issues = "https://github.com/pironjulien/NexusWindows-Antigravity/issues"
+
+[project.scripts]
+nexus-windows-antigravity = "nexus_windows_antigravity.launch:main"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+# Le dossier client/ devient le paquet nexus_windows_antigravity (modules chargés à plat par launch.py).
+[tool.hatch.build.targets.wheel]
+packages = ["client"]
+
+[tool.hatch.build.targets.wheel.sources]
+"client" = "nexus_windows_antigravity"
+
+[tool.hatch.build.targets.sdist]
+include = ["client/", "tests/", "README.md", "LICENSE", "CHANGELOG.md", "pyproject.toml", "uv.lock", "server.json"]
 
 [dependency-groups]
 dev = [
@@ -25,7 +63,7 @@ link-mode = "copy"
 
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+target-version = "py311"
 # Copie publique seulement : modules de shared copiés dans client/ par l'export (vérifiés dans leur propre dépôt).
 extend-exclude = ["client/foreground_lock.py", "client/garde_fous.py", "plugins-marketplace"]
 
@@ -38,6 +76,6 @@ pythonpath = ["."]
 
 [tool.pyright]
 include = ["client", "scripts", "tests"]
-pythonVersion = "3.10"
+pythonVersion = "3.11"
 # Modules charges par chemin (sys.path) : le client et les modules communs du dossier shared voisin.
 extraPaths = ["client", ".", "../shared"]

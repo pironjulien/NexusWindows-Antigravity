@@ -9,6 +9,28 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-10-23 — One-command install, common tool names
+
+The three NexusWindows tools (Claude, Codex, Antigravity) move to 3.0.0 together: one-command install from a package
+registry, the same five tool names (`windows`, `look`, `act`, `launch`, `window`), the same step outcomes
+(✓ verified, = already done, ~ unknown, ✗ failed or refused), and from now on one version number for the family.
+
+### Added
+- PyPI package `nexus-windows-antigravity`: `uvx --python 3.14 nexus-windows-antigravity` in Antigravity's
+  `mcp_config.json`, no clone needed; published by Trusted Publishing, then to the official MCP registry.
+- The server announces its title and version at initialization.
+
+### Changed
+- Listed tools renamed `windows`, `look`, `act`, `launch` (`app`) and `window` (`action="close"`), like the other two
+  tools; the former names (`computer_look`, `computer_act`, `computer_open_path`, `computer_close_window`...) stay
+  callable, unlisted.
+- Python 3.11 or later (Pillow 13 requires it); Pillow 13.0.0.
+
+### Fixed
+- `computer.log` no longer records the expected or observed text of a failed batch, nor typed text quoted by a step
+  error: only their length (the reply to the agent keeps them). Screenshots are pruned after each write (at most 50,
+  previously 51) and at server start.
+
 ## [2.11.0] - 2026-10-23 — Background input recipes, common journal, stop on unknown outcome
 
 ### Added

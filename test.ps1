@@ -2,9 +2,9 @@ param([switch]$Full)
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "scripts\runtime.ps1")
 if (-not (Test-Path $pythonExe)) { throw "Executer install.ps1 pour preparer le runtime local." }
-& $pythonExe -m ruff check $PSScriptRoot
+& $pythonExe -m ruff check --cache-dir "$localRoot\ruff-cache" $PSScriptRoot
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
-& $pythonExe -m ruff format --check $PSScriptRoot
+& $pythonExe -m ruff format --cache-dir "$localRoot\ruff-cache" --check $PSScriptRoot
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 # Enveloppes COM d'UI Automation (comtypes.gen), generees dans l'environnement au premier import : un environnement
 # neuf (CI, nouveau clone) n'en a pas encore, et Pyright ne verrait pas comtypes.gen.UIAutomationClient.

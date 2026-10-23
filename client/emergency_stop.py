@@ -20,7 +20,6 @@ from __future__ import annotations
 import ctypes
 import json
 import os
-import re
 import threading
 import time
 from ctypes import wintypes
@@ -55,11 +54,10 @@ class EmergencyStopError(PermissionError):
 
 def _version() -> str:
     try:
-        text = (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text(encoding="utf-8")
-        found = re.search(r'^version\s*=\s*"([^"]+)"', text, re.MULTILINE)
-        return found.group(1) if found else "inconnue"
-    except OSError:
-        return "inconnue"
+        from journal_commun import version
+    except ImportError:
+        from .journal_commun import version  # type: ignore[no-redef]
+    return version()
 
 
 VERSION = _version()

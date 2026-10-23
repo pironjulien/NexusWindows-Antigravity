@@ -1,0 +1,40 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.pironjulien/nexus-windows-antigravity",
+  "title": "NexusWindows for Antigravity",
+  "description": "Windows computer use in the background for Antigravity: UI Automation, Win32 messages, read back.",
+  "version": "3.0.0",
+  "websiteUrl": "https://julienpiron.fr/nexuswindows/antigravity/",
+  "repository": {
+    "url": "https://github.com/pironjulien/NexusWindows-Antigravity",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "nexus-windows-antigravity",
+      "version": "3.0.0",
+      "runtimeHint": "uvx",
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "--python",
+          "value": "3.14"
+        }
+      ],
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "PYTHONUTF8",
+          "description": "UTF-8 mode for Python on Windows (recommended)",
+          "isRequired": false,
+          "format": "string",
+          "default": "1"
+        }
+      ]
+    }
+  ]
+}

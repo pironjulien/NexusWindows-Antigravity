@@ -23,11 +23,10 @@ MARK_OK, MARK_ALREADY, MARK_UNKNOWN, MARK_FAIL = "✓", "=", "~", "✗"
 NEXT_OK = "✓ fait, passe à la suite."
 NEXT_ALREADY = "= déjà fait : NE PAS recommencer, passe à la suite."
 NEXT_UNKNOWN = (
-    "~ effet non vu : regarde l'image jointe (ou computer_look) avant toute nouvelle tentative ; "
-    "ne renvoie pas le même lot."
+    "~ effet non vu : regarde l'image jointe (ou look) avant toute nouvelle tentative ; ne renvoie pas le même lot."
 )
 NEXT_REPEAT = (
-    "✗ refusé, RIEN n'a été fait : même lot renvoyé sans avoir regardé. Regarde d'abord (computer_look), puis envoie "
+    "✗ refusé, RIEN n'a été fait : même lot renvoyé sans avoir regardé. Regarde d'abord (look), puis envoie "
     "un lot corrigé ; repeat=true seulement pour forcer en connaissance de cause."
 )
 
@@ -63,7 +62,7 @@ def _alternative(error_type: str, message: str) -> str:
     if "lecture seule" in low:
         return "champ en lecture seule : rien à y saisir, vise un autre champ"
     if "fenêtre non précisée" in low:
-        return "nomme la fenêtre (hwnd : numéro de computer_list_windows, titre ou processus)"
+        return "nomme la fenêtre (hwnd : numéro de windows, titre ou processus)"
     if error_type == "ForegroundLostError":
         return (
             "la fenêtre n'est pas passée devant : réessaie en arrière-plan (cible par libellé), sinon demande à Julien"
@@ -77,10 +76,10 @@ def _alternative(error_type: str, message: str) -> str:
     if error_type == "TimeoutError" or "tient la souris" in low or "en train de taper" in low:
         return "réessaie dans quelques secondes (ou en arrière-plan, sans foreground)"
     if "introuvable" in low or "aucun élément en cache" in low or "n'est plus accessible" in low:
-        return "regarde la fenêtre (computer_look) et vise un libellé visible"
+        return "regarde la fenêtre (look) et vise un libellé visible"
     if error_type == "PermissionError":
         return "fenêtre protégée : demande à Julien"
-    return "regarde la fenêtre (computer_look) avant d'envoyer un autre lot"
+    return "regarde la fenêtre (look) avant d'envoyer un autre lot"
 
 
 def _clip(text: str, limit: int = 200) -> str:
@@ -113,7 +112,7 @@ def next_for_result(data: Any) -> str:
         return f"✗ échec : {cause} ; regarde l'image jointe, puis corrige la cible ou la valeur (pas le même lot)."
     if data.get("pending"):
         return (
-            "~ commande partie, fenêtre occupée (boîte de dialogue ?) : regarde (computer_look) avant toute autre "
+            "~ commande partie, fenêtre occupée (boîte de dialogue ?) : regarde (look) avant toute autre "
             "action ; ne renvoie pas le même lot."
         )
     return NEXT_UNKNOWN
@@ -157,7 +156,7 @@ def mark_for_status(status: str, data: dict[str, Any]) -> str:
 
 
 def next_for_act(data: dict[str, Any]) -> str:
-    """Consigne d'un lot computer_act : première étape en échec, sinon effet non vu, sinon tout fait."""
+    """Consigne d'un lot act : première étape en échec, sinon effet non vu, sinon tout fait."""
     steps = data.get("steps") or []
     for step in steps:
         if step.get("status") == "error":
@@ -178,7 +177,7 @@ def next_for_act(data: dict[str, Any]) -> str:
     if unknown:
         return (
             f"~ effet non vu aux étapes {unknown} : lot arrêté, la suite n'a pas été envoyée ; "
-            "regarde l'image jointe ou computer_look avant toute nouvelle tentative ; "
+            "regarde l'image jointe ou look avant toute nouvelle tentative ; "
             "ne renvoie pas le même lot (les étapes ✓ et = sont faites)."
         )
     if steps and all(s.get("mark") == MARK_ALREADY for s in steps):
@@ -197,7 +196,7 @@ def signature(kind: str, payload: Any) -> str:
 
 class RepeatGuard:
     """Refuse un lot (ou une action) identique au précédent sur la même fenêtre, renvoyé dans les REPEAT_WINDOW_S
-    secondes sans observation (computer_look, computer_get_window_state) entre les deux."""
+    secondes sans observation (look, computer_get_window_state) entre les deux."""
 
     def __init__(self, window_s: float = REPEAT_WINDOW_S) -> None:
         self.window_s = window_s

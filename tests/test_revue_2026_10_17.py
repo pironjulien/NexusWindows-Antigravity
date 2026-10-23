@@ -704,7 +704,7 @@ def test_b12_dead_files_and_chrome_bridge_leftovers_are_gone():
             ".git" in path.parts
             or "plugins-marketplace" in path.parts
             or path.suffix not in {".py", ".ps1", ".md", ".json"}
-            or path.name == "CHANGELOG.md"
+            or path.name.startswith("CHANGELOG")
         ):
             continue
         if path.name == Path(__file__).name:

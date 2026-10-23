@@ -1,7 +1,7 @@
 """Indicateur « agent au travail » : le logo π de Julien tourne sur lui-même en bas à droite de l'écran de la fenêtre
 pilotée, comme un écran de chargement de jeu, sans halo (le logo seul, avec son ombre).
 
-Affiché dès qu'une action démarre (computer_act, ouverture, fermeture, alias d'action ; jamais les simples lectures),
+Affiché dès qu'une action démarre (act, ouverture, fermeture, alias d'action ; jamais les simples lectures),
 retiré 1,618 s après la dernière. Fenêtre en couches toujours au premier plan, sans bordure, transparente aux clics, jamais activée, absente
 de la barre des tâches (fenêtre d'outil) et des captures d'écran (WDA_EXCLUDEFROMCAPTURE : ni `look` ni une capture
 de l'utilisateur ne la voient). Dessinée par un fil dédié du serveur : rien d'autre ne s'affiche, aucun processus en

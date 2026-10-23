@@ -9,11 +9,29 @@ import json
 import os
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-VERSION = "2.11.0"
+
+def version() -> str:
+    """Version de l'outil : pyproject.toml des sources, sinon celle du paquet installé (uvx), sinon « inconnue »."""
+    try:
+        text = (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text(encoding="utf-8")
+        found = re.search(r'^version\s*=\s*"([^"]+)"', text, re.MULTILINE)
+        if found:
+            return found.group(1)
+    except OSError:
+        pass
+    try:
+        from importlib.metadata import version as installed
+
+        return installed("nexus-windows-antigravity")
+    except Exception:  # noqa: BLE001 - ni sources ni paquet installé
+        return "inconnue"
+
+
+VERSION = version()
 # Cause d'erreur : seulement le début du message, avant le premier guillemet, deux-points, parenthèse ou crochet ; ce
 # qui suit peut venir de l'écran (noms, options listées, valeurs). Relecture de Codex du 23/10.
 _CUT = re.compile(r"[«\"“'’(\[:{]")
@@ -63,7 +81,7 @@ def _ligne(appel: str, app: str | None, cadre: str | None, action: str | None, t
            ms: float | None, premier_plan: bool, erreur: Any) -> dict[str, Any]:  # fmt: skip
     return {
         "v": 1,
-        "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        "ts": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         "agent": "antigravity",
         "outil": VERSION,
         "appel": appel,
@@ -137,7 +155,7 @@ def lignes(kind: str, app: str | None, cadre: str | None, out: dict[str, Any], m
 
 def ecrire(lignes_: list[dict[str, Any]]) -> None:
     try:
-        chemin = _racine() / f"{datetime.now(timezone.utc):%Y-%m}.jsonl"
+        chemin = _racine() / f"{datetime.now(UTC):%Y-%m}.jsonl"
         chemin.parent.mkdir(parents=True, exist_ok=True)
         with chemin.open("a", encoding="utf-8") as f:
             for ligne in lignes_:

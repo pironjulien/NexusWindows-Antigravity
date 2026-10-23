@@ -386,7 +386,7 @@ def test_uia_reader_keeps_auto_set_focus_off():
 # -----------------------------------------------------------------------------
 # 6. Surface d'outils pour Gemini
 # -----------------------------------------------------------------------------
-LISTED = {"computer_list_windows", "computer_look", "computer_act", "computer_open_path", "computer_close_window"}
+LISTED = {"windows", "look", "act", "launch", "window"}  # noms communs des trois NexusWindows
 
 
 def test_computer_server_lists_five_short_tools_with_one_example_each():
@@ -485,7 +485,7 @@ def test_mcp_act_status_and_next_agree_with_the_failing_step(monkeypatch):
         reply = mcp_server.computer_act(steps=[{"action": "click", "target": "Bravo"}], hwnd=4242)
     payload = json.loads(reply[0])  # échec : image jointe
     assert payload["status"] == "failed" and payload["data"]["mark"] == "✗"
-    assert payload["next"].startswith("étape 1 : ✗ échec") and "computer_look" in payload["next"]
+    assert payload["next"].startswith("étape 1 : ✗ échec") and "look" in payload["next"]
     unseen = {"success": None, "steps": [{"step": 0, "status": "unverified", "mark": "~"}]}
     unseen["next"] = agent_guard.next_for_act(unseen)
     with patch.object(computer_client, "act", return_value=unseen):

@@ -60,19 +60,20 @@ class CuratedMCPServer(MCPServer):
 
 
 COMPUTER_GOLDEN_RULE = (
-    "RÈGLE D'OR : computer_look → computer_act en UN lot avec des cibles par libellé ; ne jamais renvoyer un "
-    "lot sans avoir regardé."
+    "RÈGLE D'OR : look → act en UN lot avec des cibles par libellé ; ne jamais renvoyer un lot sans avoir regardé."
 )
 
 computer_mcp = CuratedMCPServer(
     name="nexus-computer",
+    title="NexusWindows for Antigravity",
+    version=journal_commun.VERSION,
     instructions=(
         f"Bureau Windows de Julien, en arrière-plan (il continue à travailler). {COMPUTER_GOLDEN_RULE}\n"
         "Toujours nommer la fenêtre (hwnd : numéro, titre ou processus) : jamais celle de devant par défaut.\n"
         "Chaque action répond par `next` : ✓ fait (passer à la suite) · = déjà fait (ne pas recommencer) · ~ effet non "
         "vu (regarder l'image jointe) · ✗ échec ou refus (cause et quoi essayer). Le suivre.\n"
         "Le lot s'arrête sur ~ ou ✗ avant l'étape suivante ; aucun rejeu automatique.\n"
-        "Lot identique renvoyé sans computer_look entre les deux : refusé ✗, rien n'est fait (repeat=true pour forcer).\n"
+        "Lot identique renvoyé sans look entre les deux : refusé ✗, rien n'est fait (repeat=true pour forcer).\n"
         "Autonomie : toute application est permise (banques et champs mot de passe compris), sauf les gestionnaires de "
         "mots de passe (ni lus ni pilotés) ; "
         "Chrome/Edge aussi, mais pour le web nexus-browser est plus fiable. Garde-fous du serveur : libellé ambigu "
@@ -116,6 +117,8 @@ TITLES = {
     "computer_scroll": "Scroll",
     "computer_drag": "Drag",
     "computer_take_screenshot": "Screenshot",
+    "launch": "Launch an app, folder or document",
+    "window": "Manage a window",
 }
 
 
@@ -133,8 +136,22 @@ def _register_computer_tool(annotations: ToolAnnotations) -> Callable[[Any], Any
     return register
 
 
+def _register_common_tool(name: str, annotations: ToolAnnotations) -> Callable[[Any], Any]:
+    """Outil principal listé sous son nom COMMUN aux trois NexusWindows (windows, look, act, launch, window) ; son ancien
+    nom (computer_…) reste appelable, non listé : aucun appel existant ne casse."""
+
+    def register(func: Any) -> Any:
+        computer_mcp.add_tool(func, name=name, annotations=_titled(func, annotations), structured_output=False)
+        if func.__name__ != name:
+            computer_mcp.add_tool(func, annotations=_titled(func, annotations), structured_output=False)
+            computer_mcp.hidden_tools.add(func.__name__)
+        return func
+
+    return register
+
+
 def _register_legacy_computer_tool(annotations: ToolAnnotations) -> Callable[[Any], Any]:
-    """Alias conservé : appelable par son nom, non listé (mêmes garde-fous que computer_act)."""
+    """Alias conservé : appelable par son nom, non listé (mêmes garde-fous que act)."""
 
     def register(func: Any) -> Any:
         computer_mcp.add_tool(func, annotations=_titled(func, annotations), structured_output=False)
@@ -142,11 +159,6 @@ def _register_legacy_computer_tool(annotations: ToolAnnotations) -> Callable[[An
         return func
 
     return register
-
-
-def _screenshot_dir() -> Path:
-    """Dossier local (hors OneDrive) des captures écrites par défaut."""
-    return Path.home() / ".nexusagy" / "screenshots"
 
 
 # =============================================================================
@@ -308,7 +320,7 @@ def _format_computer_result(func: Any, *args: Any, **kwargs: Any) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2 if payload["status"] == "success" else None)
 
 
-@_register_computer_tool(READ_ONLY)
+@_register_common_tool("windows", READ_ONLY)
 def computer_list_windows(visible_only: bool = True, by_app: bool = False) -> str:
     """Liste les fenêtres ouvertes : hwnd, titre, processus (application réelle pour UWP), position, premier plan.
     by_app=true : groupées par application.
@@ -318,7 +330,7 @@ def computer_list_windows(visible_only: bool = True, by_app: bool = False) -> st
     return _format_computer_result(computer_client.list_windows, visible_only=visible_only)
 
 
-@_register_computer_tool(READ_ONLY)
+@_register_common_tool("look", READ_ONLY)
 def computer_look(
     hwnd: int | str | None = None,
     query: str | None = None,
@@ -329,7 +341,7 @@ def computer_look(
     output_path: str | None = None,
     format: str = "text",
 ) -> Any:
-    """RÈGLE D'OR : computer_look → computer_act en un lot, cibles par libellé ; jamais un lot renvoyé sans regarder.
+    """RÈGLE D'OR : look → act en un lot, cibles par libellé ; jamais un lot renvoyé sans regarder.
     Regarde une fenêtre NOMMÉE (hwnd : numéro, titre ou processus) SANS la mettre devant (recouverte comprise) : une
     ligne par élément « [N] rôle « nom » = « valeur » états @x,y » et image jointe (WebP). query filtre ; annotate=true
     dessine les numéros ; format="json" : JSON compact (box_2d 0-1000 par élément). Débloque un lot déjà envoyé.
@@ -364,7 +376,7 @@ def computer_look(
     return text
 
 
-@_register_computer_tool(ACT)
+@_register_common_tool("act", ACT)
 def computer_act(
     steps: list[dict[str, Any]],
     hwnd: int | str | None = None,
@@ -377,7 +389,7 @@ def computer_act(
     """Agit en UN lot, en arrière-plan, sur une fenêtre NOMMÉE (hwnd), sans lire le code : jeton commun, arrêt d'urgence et pause de Julien gérés ici.
     Actions : click, double_click, right_click, type, set, clear, check, uncheck, select (option), expand, collapse, menu (path), key, scroll, drag, hover, wait (seconds, text), focus.
     Cible : target="Libellé exact", "#N", box_2d ou x/y ; libellé ambigu refusé. Étapes ✓ = ~ ✗, status = la pire ; suivre `next`. Lot arrêté sur ~ ou ✗, sans suite envoyée ni rejeu ; regarder avant de reprendre une issue inconnue.
-    Actions sortantes (payer, envoyer, publier, transférer, et la touche Entrée qui les déclencherait) : `confirm: true` ET `accord: "<jeton>"` (sur l'étape ou en paramètre) rendu par le premier refus qui décrit l'action exacte. Destructions locales (supprimer définitivement, désinstaller, formater, réinitialiser) : `confirm: true` seul. Ordre explicite de Julien = confirmation, ton initiative = demander d'abord. Même lot sans computer_look : refusé.
+    Actions sortantes (payer, envoyer, publier, transférer, et la touche Entrée qui les déclencherait) : `confirm: true` ET `accord: "<jeton>"` (sur l'étape ou en paramètre) rendu par le premier refus qui décrit l'action exacte. Destructions locales (supprimer définitivement, désinstaller, formater, réinitialiser) : `confirm: true` seul. Ordre explicite de Julien = confirmation, ton initiative = demander d'abord. Même lot sans look : refusé.
     foreground=True : vraie souris/clavier en repli seulement.
     Exemple : {"hwnd": "Commande", "steps": [{"action": "set", "target": "Nom", "text": "Julien"}, {"action": "check", "target": "Accepter"}, {"action": "click", "target": "Valider"}]}"""
     return _computer_action(
@@ -391,7 +403,7 @@ def computer_act(
     )
 
 
-@_register_computer_tool(ACT)
+@_register_legacy_computer_tool(ACT)
 def computer_open_path(path: str) -> str:
     """Ouvre un chemin existant comme un double-clic (document, dossier, programme, script, raccourci), ouverture
     relue. Refusées : URL et protocoles (pages web : nexus-browser).
@@ -408,7 +420,7 @@ def computer_open_path(path: str) -> str:
         return text
 
 
-@_register_computer_tool(LOCAL)
+@_register_legacy_computer_tool(LOCAL)
 def computer_close_window(hwnd: int | str) -> Any:
     """Ferme une fenêtre proprement (UI Automation, sinon WM_CLOSE), fermeture relue ; une boîte « Enregistrer ? »
     éventuelle est signalée, jamais validée à la place de Julien.
@@ -418,8 +430,29 @@ def computer_close_window(hwnd: int | str) -> Any:
     )
 
 
+@_register_common_tool("launch", ACT)
+def launch(app: str) -> str:
+    """Ouvre une application (nom comme « notepad.exe » ou chemin), un dossier ou un document, comme un double-clic,
+    ouverture relue. Refusées : URL et protocoles (pages web : nexus-browser).
+    Exemple : {"app": "notepad.exe"}"""
+    return computer_open_path(app)
+
+
+@_register_common_tool("window", LOCAL)
+def window(action: str, hwnd: int | str) -> Any:
+    """Gère une fenêtre NOMMÉE (hwnd : numéro, titre ou processus). action="close" : la ferme proprement (UI Automation,
+    sinon WM_CLOSE), fermeture relue ; une boîte « Enregistrer ? » éventuelle est signalée, jamais validée.
+    Exemple : {"action": "close", "hwnd": 123456}"""
+    if action != "close":
+        return json.dumps(
+            {"status": "error", "error": f"action inconnue « {action} » : seule close est prise en charge"},
+            ensure_ascii=False,
+        )
+    return computer_close_window(hwnd)
+
+
 # --- Alias conservés : appelables par leur nom, non listés ------------------------------------------------------
-# Mêmes garde-fous que computer_act : fenêtre nommée, arrière-plan d'abord (foreground=False par défaut), vraie
+# Mêmes garde-fous que act : fenêtre nommée, arrière-plan d'abord (foreground=False par défaut), vraie
 # souris/clavier seulement avec foreground=True et une fenêtre visée, confirm=true pour payer, envoyer, publier…
 @_register_legacy_computer_tool(READ_ONLY)
 def computer_list_apps() -> str:
@@ -434,7 +467,7 @@ def computer_focus_window(
     process_name: str | None = None,
 ) -> str:
     """Met une fenêtre au premier plan sous le jeton commun : seulement pour la montrer à Julien, jamais pour préparer
-    une action (computer_look et computer_act travaillent sur une fenêtre recouverte)."""
+    une action (look et act travaillent sur une fenêtre recouverte)."""
     with busy_indicator.working(hwnd or 0):
         t0 = time.perf_counter()
         text = _format_computer_result(computer_client.focus_window, hwnd=hwnd, title=title, process_name=process_name)
@@ -491,7 +524,7 @@ def computer_click(
     repeat: bool = False,
     confirm: bool = False,
 ) -> Any:
-    """Alias d'une étape click de computer_act : élément [N], box_2d (0-1000) ou (x, y) ; arrière-plan d'abord (le point
+    """Alias d'une étape click de act : élément [N], box_2d (0-1000) ou (x, y) ; arrière-plan d'abord (le point
     est rapporté à l'élément visé), vraie souris en repli avec foreground=True. Compte rendu avec `next`."""
     args = {"element_index": element_index, "x": x, "y": y, "box_2d": box_2d, "button": button,
             "click_count": click_count, "foreground": foreground, "coords": coords, "confirm": confirm}  # fmt: skip
@@ -630,7 +663,7 @@ def computer_take_screenshot(
     output_path: str | None = None,
     annotate_screenshot: bool = False,
 ) -> str:
-    """Alias de l'image de computer_look : capture WebP (< 200 Ko) de la fenêtre nommée ou de tout l'écran, écrite sur
+    """Alias de l'image de look : capture WebP (< 200 Ko) de la fenêtre nommée ou de tout l'écran, écrite sur
     disque."""
 
     def _action() -> dict[str, Any]:
@@ -646,16 +679,12 @@ def computer_take_screenshot(
             return_meta=True,
             elements_to_annotate=elements_to_draw,
         )
-        dest_path = output_path
-        if not dest_path:
-            cache_dir = _screenshot_dir()
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            computer_client.cleanup_screenshot_cache(max_files=50, max_age_hours=24.0)
-            dest_path = str(cache_dir / f"screenshot_{int(time.time() * 1000)}.webp")
-
-        dest = Path(dest_path).expanduser().resolve()
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(data_bytes)
+        if output_path:
+            dest = Path(output_path).expanduser().resolve()
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(data_bytes)
+        else:
+            dest = computer_client.save_screenshot(data_bytes, "screenshot")
         if target_hwnd:
             _observed(target_hwnd)
         return {
@@ -677,16 +706,24 @@ def listed_tool_names(server: MCPServer) -> list[str]:
     return [tool.name for tool in asyncio.run(server.list_tools())]
 
 
-if __name__ == "__main__":
+def main(argv: list[str] | None = None) -> None:
+    """Point d'entrée du serveur (script, commande `nexus-windows-antigravity` du paquet PyPI)."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="NexusAGY Model Context Protocol Server (Computer Use)")
+    parser = argparse.ArgumentParser(description="NexusWindows for Antigravity: MCP server (Windows computer use)")
     parser.add_argument("--server", choices=["computer"], default="computer", help="computer (5 outils listés)")
-    parser.parse_args()
+    parser.parse_args(argv)
 
     if sys.platform == "win32":
+        # Captures de plus de 24 h purgées dès le démarrage, pas seulement à la capture suivante (relecture de Codex).
+        # Sous Windows seulement : ailleurs, le client est un bouchon et le serveur doit démarrer (annuaires MCP).
+        computer_client.cleanup_screenshot_cache()
         # Arrêt d'urgence commun (Ctrl+Alt+Maj+Échap) : surveillance de ~/.nexus/stop et prise du raccourci.
         emergency_stop.start()
         # Gestes physiques de Julien (Raw Input) : pause avant toute vraie souris/clavier, interruption s'il reprend.
         physical_input.start()
     computer_mcp.run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()
