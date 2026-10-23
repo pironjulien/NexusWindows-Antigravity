@@ -396,9 +396,9 @@ def test_computer_server_lists_five_short_tools_with_one_example_each():
         if tool.name in LISTED:
             lines = [line for line in (tool.description or "").splitlines() if line.strip()]
             assert 2 <= len(lines) <= 6, tool.name
-            assert sum("Exemple" in line for line in lines) == 1, tool.name
-    assert "RÈGLE D'OR" in (mcp_server.computer_mcp.instructions or "")
-    assert "RÈGLE D'OR" in (mcp_server.computer_look.__doc__ or "")
+            assert sum("Example" in line for line in lines) == 1, tool.name
+    assert "GOLDEN RULE" in (mcp_server.computer_mcp.instructions or "")
+    assert "GOLDEN RULE" in (mcp_server.computer_look.__doc__ or "")
 
 
 def test_aliases_stay_callable_and_listed_by_the_full_server():

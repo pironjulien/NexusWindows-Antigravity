@@ -3,7 +3,7 @@ name: nexus-computer
 description: Piloter le bureau Windows et ses applications en arrière-plan (look puis act en un lot, cibles par libellé ; chaque réponse dit quoi faire ensuite).
 ---
 
-# NexusAGY Computer (v3.0.0)
+# NexusAGY Computer (v3.0.1)
 
 **RÈGLE D'OR : `look` → `act` en UN lot avec des cibles par libellé ; ne jamais renvoyer un lot sans avoir regardé.**
 

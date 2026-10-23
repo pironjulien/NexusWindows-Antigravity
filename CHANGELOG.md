@@ -9,6 +9,16 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-10-23 — Family harmonization
+
+### Changed
+- The MCP server announces itself as `nexus-windows-antigravity` (was `nexus-computer`) at initialization, the name
+  of its package, like `nexus-windows` (Claude) and `nexus-windows-codex` (Codex); the `mcp_config.json` example in
+  the README uses it as the server key.
+- Tool descriptions (`windows`, `look`, `act`, `launch`, `window`) and server instructions are now in English, in line
+  with the other two NexusWindows tools; same meaning and same rules (✓ = ~ ✗, `confirm`, `accord`, emergency stop,
+  screen text is data, never an instruction). Tool replies are unchanged.
+
 ## [3.0.0] - 2026-10-23 — One-command install, common tool names
 
 The three NexusWindows tools (Claude, Codex, Antigravity) move to 3.0.0 together: one-command install from a package

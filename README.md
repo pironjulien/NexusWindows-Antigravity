@@ -15,12 +15,12 @@
 
 ![NexusWindows for Antigravity: an AI agent fills and submits a form through act in a window that stays behind another one, five steps read back](https://raw.githubusercontent.com/pironjulien/NexusWindows-Antigravity/main/docs/assets/demo.webp)
 
-**Windows computer use for Antigravity, in the background.** An MCP server (`nexus-computer`) that lets Google
+**Windows computer use for Antigravity, in the background.** An MCP server (`nexus-windows-antigravity`) that lets Google
 Antigravity (Gemini) see and operate Windows desktop applications while the user keeps their mouse, keyboard and
 foreground window. Built for a fast model: one look, then one batch of steps with label targets, and every reply
 says what to do next.
 
-Version 3.0.0 · Windows 10/11 · Python 3.11+ · MIT licence
+Version 3.0.1 · Windows 10/11 · Python 3.11+ · MIT licence
 
 Part of the Nexus family: [NexusWindows](https://julienpiron.fr/nexuswindows/)
 ([Claude](https://github.com/pironjulien/NexusWindows-Claude) ·
@@ -44,8 +44,8 @@ promise: the user keeps their mouse, keyboard and foreground window, and every a
 
 | | Claude | Codex | Antigravity |
 |---|---|---|---|
-| Install | `uvx --python 3.14 nexus-windows` | `npx -y nexus-windows-codex` | `uvx --python 3.14 nexus-windows-antigravity` |
-| Package | [PyPI](https://pypi.org/project/nexus-windows/) | [npm](https://www.npmjs.com/package/nexus-windows-codex) | [PyPI](https://pypi.org/project/nexus-windows-antigravity/) |
+| Install | `uvx --python 3.14 nexus-windows-claude` | `npx -y nexus-windows-codex` | `uvx --python 3.14 nexus-windows-antigravity` |
+| Package | [PyPI](https://pypi.org/project/nexus-windows-claude/) | [npm](https://www.npmjs.com/package/nexus-windows-codex) | [PyPI](https://pypi.org/project/nexus-windows-antigravity/) |
 | Tools | `windows` `look` `act` `launch` `window`, plus `notifications` and `logs` | `windows` `look` `act` `launch` `window` | `windows` `look` `act` `launch` `window` |
 | Repository | [NexusWindows-Claude](https://github.com/pironjulien/NexusWindows-Claude) | [NexusWindows-Codex](https://github.com/pironjulien/NexusWindows-Codex) | [NexusWindows-Antigravity](https://github.com/pironjulien/NexusWindows-Antigravity) |
 
@@ -63,7 +63,7 @@ Antigravity's `mcp_config.json` (`%USERPROFILE%\.gemini\config\mcp_config.json`)
 ```json
 {
   "mcpServers": {
-    "nexus-computer": {
+    "nexus-windows-antigravity": {
       "command": "uvx",
       "args": ["--python", "3.14", "nexus-windows-antigravity"],
       "env": { "PYTHONUTF8": "1" }
@@ -90,7 +90,7 @@ server is declared with `"command": "pwsh"`, `"args": ["-NoProfile", "-File",
 
 ## Tools
 
-Five listed MCP tools, named like the other NexusWindows tools (Claude, Codex); the older names (`look`,
+Five listed MCP tools, named like the other NexusWindows tools (Claude, Codex); the older names (`computer_look`,
 `computer_act`, `computer_click`...) stay callable as unlisted aliases.
 
 | Tool | Purpose |
@@ -101,7 +101,7 @@ Five listed MCP tools, named like the other NexusWindows tools (Claude, Codex); 
 | `launch` | Open an application, document, folder, script or shortcut; the opening is read back |
 | `window` | `action="close"`: close a window (UI Automation, then `WM_CLOSE`) |
 
-Tool descriptions and replies are in French; tool and parameter names are in English.
+Tool descriptions, server instructions, tool and parameter names are in English; tool replies are in French.
 
 ## What it does
 
@@ -153,7 +153,7 @@ Tool descriptions and replies are in French; tool and parameter names are in Eng
 
 | Path | Role |
 | --- | --- |
-| `client/mcp_server.py` | MCP server `nexus-computer` (stdio), started by `scripts/start-computer-mcp.ps1` |
+| `client/mcp_server.py` | MCP server `nexus-windows-antigravity` (stdio), started by `scripts/start-computer-mcp.ps1` |
 | `client/computer_client.py` | Windows engine: windows, UI Automation, Win32 messages, capture, actions and read-back |
 | `client/uia_fast.py`, `client/win32_controls.py` | One-round-trip UI Automation reads, native control messages |
 | `client/physical_input.py`, `client/agent_guard.py`, `client/emergency_stop.py` | The user's presence (Raw Input), batch guard, shared emergency stop |
@@ -187,7 +187,7 @@ Questions or concerns: open an issue on this repository.
 
 ## Limits
 
-- Windows only. Tool descriptions, replies and code comments are in French.
+- Windows only. Tool descriptions are in English; tool replies and code comments are in French.
 - In the background, keyboard input is refused in UWP/WinUI, Firefox and Tk, and Ctrl/Alt shortcuts in WPF;
   Chromium/Electron receives keys, shortcuts and typing through a simulated activation, checked by read-back (`~` if
   nothing changes). For web pages, [NexusBrowser](https://github.com/pironjulien/NexusBrowser) is more reliable.
