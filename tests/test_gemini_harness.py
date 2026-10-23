@@ -415,10 +415,7 @@ def test_guides_are_short_imperative_and_in_sync():
     skill = (REPO_ROOT / "plugins/nexus-computer/skills/nexus-computer/SKILL.md").read_text(encoding="utf-8")
     assert "RÈGLE D'OR" in skill and "| Situation | Outil |" in skill
     assert len(skill.splitlines()) < 90
-    gemini_file = REPO_ROOT / "GEMINI.md"  # absent de la copie publique (directives privées, non exportées)
-    if gemini_file.exists():
-        gemini = gemini_file.read_text(encoding="utf-8")
-        assert "RÈGLE D'OR" in gemini and "| Situation | Outil |" in gemini
+    # GEMINI.md ne porte plus la doc de l'outil : Julien l'a réservé aux règles souveraines (a4baed2, e0a4a4b, 20d4aa7).
 
 
 # -----------------------------------------------------------------------------

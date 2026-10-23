@@ -17,7 +17,7 @@ Antigravity (Gemini) see and operate Windows desktop applications while the user
 foreground window. Built for a fast model: one look, then one batch of steps with label targets, and every reply
 says what to do next.
 
-Version 2.9.0 · Windows 10/11 · Python 3.10+ · MIT licence
+Version 2.10.1 · Windows 10/11 · Python 3.10+ · MIT licence
 
 Part of the Nexus family: [NexusWindows](https://julienpiron.fr/nexuswindows/)
 ([Claude](https://github.com/pironjulien/NexusWindows-Claude) ·
@@ -71,6 +71,9 @@ Tool descriptions and replies are in French; tool and parameter names are in Eng
 - **Read-back after every action**: `verified` true/false/None from a real read (field value, check state,
   selection, focused element, window title, image); `success` is never true on "command sent" alone. Steps accept a
   postcondition `expect` (already true: step skipped with `already: true`; false after: step failed).
+  A batch stops at the first failed or unverified step, before sending the next action, with no automatic replay.
+  A verified postcondition establishes the effect and allows the batch to continue; an unknown effect requires
+  observation before preparing the remaining steps.
 - **The user's physical input via Raw Input** (injected input ignored): wait for a pause before any real mouse or
   keyboard action, and stop at the next checkpoint if the user touches keyboard or mouse (`interrupted_by_user`).
 - **Guards in the code, not only in the instructions**: the window is always named (never the foreground one by
@@ -154,7 +157,12 @@ network requests of its own.
   window, duration, outcome and short details such as a target label, coordinates, key names, a menu path or the
   number of characters typed, never the typed text; rotated at 5 MB, three backups) and screenshots (at most 50,
   each kept under 24 hours). Under `~/.nexus/`: the shared foreground token and emergency-stop state.
-- **Removing it**: remove the server from Antigravity's MCP settings, then delete `~/.nexusagy/`.
+  Under `%LOCALAPPDATA%\NexusJournal\windows\antigravity\` (or `NEXUS_JOURNAL_HOME`): a short monthly JSONL journal,
+  in the same format as the other NexusWindows tools (app executable name, action, technique, outcome, duration,
+  whether the foreground was used, and the first words of an error, cut before any quote, colon or bracket); never
+  typed text, screen text, labels, titles or paths. The server never deletes it.
+- **Removing it**: remove the server from Antigravity's MCP settings, then delete `~/.nexusagy/` (and
+  `%LOCALAPPDATA%\NexusJournal`).
 
 Questions or concerns: open an issue on this repository.
 

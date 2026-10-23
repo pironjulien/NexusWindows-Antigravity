@@ -422,9 +422,13 @@ def test_win32_list_item_uses_lb_setcursel_and_never_uia_select():
     assert "UIA Select" not in names and "UIA Invoke" not in names
 
 
-def test_winforms_tries_uia_before_messages_and_no_bn_clicked_on_checkbox():
+def test_winforms_pushbutton_posts_bn_clicked_first_and_no_bn_clicked_on_checkbox():
+    # Banc commun du 21/10 : UIA Invoke est synchrone ; un bouton qui ouvre une boîte modale le bloquait, puis le repli
+    # BN_CLICKED rouvrait la boîte (« modale ouverte » ×2). BN_CLICKED posté passe donc en premier.
     button = {"framework": "WinForms", "type": "Button", "name": "OK", "hwnd": 7, "props": {"has_invoke": True}}
-    assert _plan(button, own_kind="button", button_kind=0) == ["UIA Invoke", "BN_CLICKED"]
+    assert _plan(button, own_kind="button", button_kind=0) == ["BN_CLICKED", "UIA Invoke"]
+    owner_drawn = {"framework": "WinForms", "type": "Button", "name": "OK", "hwnd": 7, "props": {"has_invoke": True}}
+    assert _plan(owner_drawn, own_kind="button", button_kind=0xB)[0] == "BN_CLICKED"
     check = {"framework": "WinForms", "type": "CheckBox", "name": "Case", "hwnd": 7, "props": {"has_toggle": True}}
     assert _plan(check, own_kind="checkbox", button_kind=3) == ["UIA Toggle"]
 
@@ -643,6 +647,123 @@ def test_act_success_is_none_when_a_step_is_unverified(monkeypatch):
     assert res["unverified_steps"] == [0]
     assert res["steps"][0]["status"] == "unverified"
     assert "expect" in res["warning"]
+
+
+@pytest.mark.parametrize(
+    "unknown",
+    [
+        {"success": None, "verified": None},
+        {"success": True, "verified": None},
+        {"success": None, "verified": True},
+        {"success": True},
+        None,
+    ],
+)
+def test_act_stops_before_next_action_when_effect_is_unknown(monkeypatch, unknown):
+    run = MagicMock(side_effect=[{"success": True, "verified": True}, unknown])
+    monkeypatch.setattr(computer_client, "_run_act_step", run)
+    res = computer_client.act(
+        steps=[{"action": "set"}, {"action": "click"}, {"action": "click", "target": "Valider"}],
+        hwnd=1,
+        then="none",
+    )
+    assert run.call_count == 2  # la validation suivante n'est jamais envoyée, ni l'action inconnue rejouée
+    assert [call.args[4] for call in run.call_args_list] == [0, 1]
+    assert res["success"] is None and res["executed_steps"] == 2 and res["total_steps"] == 3
+    assert res["unverified_steps"] == [1] and res["steps"][1]["status"] == "unverified"
+    assert "suite" in res["warning"] and "arrêté" in res["next"]
+
+
+def test_act_continues_when_explicit_postcondition_resolves_unknown_effect(monkeypatch):
+    run = MagicMock(side_effect=[{"success": None, "verified": None}, {"success": True, "verified": True}])
+    monkeypatch.setattr(computer_client, "_run_act_step", run)
+    monkeypatch.setattr(computer_client, "wait_expect", lambda h, e: (True, {"exists": True}))
+    res = computer_client.act(
+        steps=[
+            {"action": "click", "expect": {"element": "Terminé", "exists": True}},
+            {"action": "click", "target": "Suivant"},
+        ],
+        hwnd=1,
+        then="none",
+    )
+    assert run.call_count == 2
+    assert res["success"] is True and res["executed_steps"] == 2
+    assert all(step["verified"] is True for step in res["steps"])
+
+
+def test_act_stops_when_postcondition_cannot_be_read_after_verified_action(monkeypatch):
+    run = MagicMock(return_value={"success": True, "verified": True})
+    monkeypatch.setattr(computer_client, "_run_act_step", run)
+    monkeypatch.setattr(computer_client, "wait_expect", lambda h, e: (None, {"error": "fenêtre illisible"}))
+    res = computer_client.act(
+        steps=[
+            {"action": "click", "expect": {"element": "Terminé", "exists": True}},
+            {"action": "click", "target": "Valider"},
+        ],
+        hwnd=1,
+        then="none",
+    )
+    run.assert_called_once()
+    assert res["success"] is None and res["executed_steps"] == 1
+    assert res["unverified_steps"] == [0] and res["steps"][0]["status"] == "unverified"
+    assert res["steps"][0]["result"]["expect"]["met"] is None
+    assert "error" not in res  # inconnu, pas un échec constaté
+
+
+def test_act_continues_after_already_satisfied_and_verified_wait(monkeypatch):
+    run = MagicMock(side_effect=[{"success": True, "verified": True}, {"success": True, "verified": True}])
+    monkeypatch.setattr(computer_client, "_run_act_step", run)
+    monkeypatch.setattr(computer_client, "check_expect", lambda h, e: (True, {"checked": True, "match": "exact"}))
+    res = computer_client.act(
+        steps=[
+            {"action": "check", "expect": {"element": "Option", "checked": True}},
+            {"action": "wait", "seconds": 0.01},
+            {"action": "click", "target": "Valider"},
+        ],
+        hwnd=1,
+        then="none",
+    )
+    assert [call.args[0] for call in run.call_args_list] == ["wait", "click"]
+    assert res["success"] is True and res["executed_steps"] == 3
+    assert res["steps"][0]["already"] is True
+
+
+@pytest.mark.parametrize(
+    "value, expected_status, expected_mark", [(None, "unverified", "~"), ("En cours", "failed", "✗")]
+)
+def test_act_does_not_mark_already_checked_as_satisfied_when_final_expect_is_unmet(
+    monkeypatch, value, expected_status, expected_mark
+):
+    checkbox, result = MagicMock(), MagicMock()
+    monkeypatch.setattr(computer_client, "_cached_window_hwnd", 1)
+    monkeypatch.setattr(computer_client, "_element_cache", {3: checkbox, 4: result})
+    monkeypatch.setattr(computer_client, "_element_info", {3: {"type": "CheckBox"}, 4: {"type": "Text"}})
+    monkeypatch.setattr(computer_client, "is_protected_system_window", lambda h: (False, ""))
+    monkeypatch.setattr(
+        computer_client, "_target_element", lambda h, i, t, b=None: (3, checkbox, {"framework": "Win32", "hwnd": 5})
+    )
+    monkeypatch.setattr(
+        computer_client, "_read_state", lambda c, i: {"toggle": 1} if c is checkbox else {"value": value}
+    )
+    chain = MagicMock()
+    check = MagicMock(wraps=computer_client.set_checked)
+    monkeypatch.setattr(computer_client, "_run_chain", chain)
+    monkeypatch.setattr(computer_client, "set_checked", check)
+    res = computer_client.act(
+        steps=[
+            {"action": "check", "target": "#3", "expect": {"element": "#4", "contains": "Terminé", "timeout": 0}},
+            {"action": "check", "target": "#3"},
+        ],
+        hwnd=1,
+        then="none",
+    )
+    check.assert_called_once()  # vrais act, _run_act_step, set_checked et check_expect ; lectures UI simulées
+    chain.assert_not_called()  # la case était déjà cochée, aucune bascule envoyée
+    assert res["executed_steps"] == 1
+    assert res["success"] is (None if value is None else False)
+    step = res["steps"][0]
+    assert step["status"] == expected_status and step["mark"] == expected_mark
+    assert step.get("already") is not True and step["result"].get("already") is not True
 
 
 def test_act_marks_user_interruption(monkeypatch):
@@ -938,3 +1059,22 @@ def test_hit_test_accepts_offscreen_control_inside_window_as_last_resort():
         _ctrl, info = computer_client._hit_test(5, 120, 115) or (None, {})
         assert info["name"] == "Valider"
         assert computer_client._hit_test(5, 650, 650) is None
+
+
+def test_list_item_outside_win32_is_selected_once_never_invoked():
+    # Banc commun du 21/10 : Invoke puis Select sélectionnait deux fois un élément de liste Electron (déclaré ✓).
+    item = {
+        "framework": "Chrome",
+        "type": "ListItem",
+        "name": "Bravo",
+        "hwnd": 0,
+        "props": {"has_invoke": True, "has_selection_item": True},
+    }
+    assert _plan(item) == ["UIA Select"]
+
+
+def test_posted_bn_clicked_without_read_effect_is_unknown_and_stops_the_chain():
+    calls = []
+    chain = [("BN_CLICKED", lambda: calls.append("bn") or "bn_clicked"), ("UIA Invoke", lambda: calls.append("uia"))]
+    out = computer_client._run_chain(chain, lambda _d: (False, "état inchangé"), 0)
+    assert calls == ["bn"] and out["technique"] == "BN_CLICKED" and out["verified"] is None

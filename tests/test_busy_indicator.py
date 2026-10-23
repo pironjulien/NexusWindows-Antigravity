@@ -67,7 +67,7 @@ def test_disabled_draws_nothing(monkeypatch):
     assert state._thread is None
 
 
-def test_frames_render_logo_and_halo():
+def test_frames_render_logo_without_halo():
     frames = busy_indicator.render_frames(72, count=8)
     side = round(72 * busy_indicator.CANVAS)
     assert len(frames) == 8 and all(len(f) == side * side * 4 for f in frames)
@@ -83,8 +83,8 @@ def test_frames_render_logo_and_halo():
     assert 60 <= opaque_columns(frames[0]) <= 80
     assert opaque_columns(frames[2]) < opaque_columns(frames[0])  # il tourne sur lui-même
     at = ((side // 2 - 40) * side + side // 2) * 4
-    b, _, r, a = frames[0][at : at + 4]
-    assert 0 < a < 255 and b > r  # halo bleu-violet
+    b, g, r, _ = frames[0][at : at + 4]
+    assert b == g == r == 0  # plus de halo bleu-violet (Julien, 22/10) : au plus l'ombre noire
 
 
 def test_imports_off_windows():

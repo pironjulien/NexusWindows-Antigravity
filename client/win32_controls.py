@@ -644,3 +644,267 @@ def edit_select_all(control: int) -> str:
 
 def is_window(hwnd: int) -> bool:
     return bool(hwnd) and bool(_IsWindow(hwnd))
+
+
+# --- Souris et raccourcis par messages (recette commune, banc NexusWindows du 21/10/2026) ------------------------
+# Mesuré par le banc commun (shared/benchmarks/windows) et NexusClaude (bench/RESULTS.md) : clic et molette postés à
+# l'enfant le plus profond sous le point ✓ en Win32 et WinForms (effet émis par l'application, premier plan intact) ;
+# WPF ignore la souris postée ; raccourcis Ctrl/Alt postés ✓ en Win32 et WinForms si l'état clavier du fil cible est
+# simulé le temps du traitement (AttachThreadInput au seul fil de la cible, jamais à celui de Julien).
+class _POINT(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+
+_ChildWindowFromPointEx = _fn("ChildWindowFromPointEx", wintypes.HWND, wintypes.HWND, _POINT, wintypes.UINT)
+_WindowFromPoint = _fn("WindowFromPoint", wintypes.HWND, _POINT)
+_ScreenToClient = _fn("ScreenToClient", wintypes.BOOL, wintypes.HWND, ctypes.POINTER(_POINT))
+_AttachThreadInput = _fn("AttachThreadInput", wintypes.BOOL, wintypes.DWORD, wintypes.DWORD, wintypes.BOOL)
+_GetKeyboardState = _fn("GetKeyboardState", wintypes.BOOL, ctypes.c_void_p)
+_SetKeyboardState = _fn("SetKeyboardState", wintypes.BOOL, ctypes.c_void_p)
+_GetForegroundWindow = _fn("GetForegroundWindow", wintypes.HWND)
+_GetCurrentThreadId = ctypes.WinDLL("kernel32").GetCurrentThreadId
+CWP_SKIPINVISIBLE, CWP_SKIPDISABLED, CWP_SKIPTRANSPARENT = 0x0001, 0x0002, 0x0004
+WM_MOUSEMOVE, WM_MOUSEWHEEL = 0x0200, 0x020A
+MOUSE_MESSAGES = {  # bouton : (appui, relâché, état MK_*, double clic)
+    "left": (0x0201, 0x0202, 0x0001, 0x0203),
+    "right": (0x0204, 0x0205, 0x0002, 0x0206),
+    "middle": (0x0207, 0x0208, 0x0010, 0x0209),
+}
+MESSAGE_MOUSE_FAMILIES = {"Win32", "WinForms"}
+# Clic par coordonnées posté : aussi Chromium/Electron recouvert (mesuré par NexusClaude, banc commun du 21/10 : effet
+# émis, premier plan intact) ; pas la molette, que Chromium ignore par message.
+MESSAGE_CLICK_FAMILIES = MESSAGE_MOUSE_FAMILIES | {"Chromium"}
+MESSAGE_SHORTCUT_FAMILIES = {"Win32", "WinForms"}
+
+
+def _to_client(hwnd: int, x: int, y: int) -> tuple[int, int]:
+    p = _POINT(x, y)
+    _ScreenToClient(hwnd, ctypes.byref(p))
+    return p.x, p.y
+
+
+_GetWindowDpiAwarenessContext = _fn("GetWindowDpiAwarenessContext", ctypes.c_void_p, wintypes.HWND)
+_GetAwarenessFromDpiAwarenessContext = _fn("GetAwarenessFromDpiAwarenessContext", ctypes.c_int, ctypes.c_void_p)
+_GetDpiFromDpiAwarenessContext = _fn("GetDpiFromDpiAwarenessContext", wintypes.UINT, ctypes.c_void_p)
+_MonitorFromWindow = _fn("MonitorFromWindow", wintypes.HMONITOR, wintypes.HWND, wintypes.DWORD)
+_GetDpiForMonitor = ctypes.WinDLL("shcore").GetDpiForMonitor
+_GetDpiForMonitor.restype = ctypes.c_long
+_GetDpiForMonitor.argtypes = [
+    wintypes.HMONITOR,
+    ctypes.c_int,
+    ctypes.POINTER(wintypes.UINT),
+    ctypes.POINTER(wintypes.UINT),
+]
+
+
+def _message_point(hwnd: int, x: int, y: int) -> tuple[int, int]:
+    """Point client d'un message souris posté, dans le repère où la fenêtre le lit : pixels logiques pour une fenêtre
+    non adaptée au DPI (ou au DPI système), car Windows ne convertit jamais un message posté (banc commun du 22/10 : à
+    125 %, le double clic sur la 3e ligne d'une ListBox WinForms tombait une ligne plus bas)."""
+    cx, cy = _to_client(hwnd, x, y)
+    context = _GetWindowDpiAwarenessContext(hwnd)
+    awareness = _GetAwarenessFromDpiAwarenessContext(context) if context else -1
+    if awareness not in (0, 1):  # par moniteur, ou contexte illisible (-1) : pixels réels
+        return cx, cy
+    # Fenêtre virtualisée : GetDpiForWindow rend 96 (ou le DPI système) ; le DPI réel est celui de son moniteur.
+    drawn = (_GetDpiFromDpiAwarenessContext(context) or 96) if awareness == 1 else 96
+    monitor = _MonitorFromWindow(hwnd, 2)
+    dpi_x, dpi_y = wintypes.UINT(), wintypes.UINT()
+    if not monitor or _GetDpiForMonitor(monitor, 0, ctypes.byref(dpi_x), ctypes.byref(dpi_y)) != 0 or not dpi_x.value:
+        return cx, cy
+    scale = dpi_x.value / drawn
+    return (cx, cy) if abs(scale - 1.0) < 0.01 else (round(cx / scale), round(cy / scale))
+
+
+def _lparam_xy(x: int, y: int) -> int:
+    return ((y & 0xFFFF) << 16) | (x & 0xFFFF)
+
+
+def deepest_child_at(top: int, x: int, y: int) -> int:
+    """Fenêtre enfant la plus profonde sous le point écran (x, y), visible et active (sinon `top`)."""
+    current = top
+    for _ in range(32):
+        cx, cy = _to_client(current, x, y)
+        flags = CWP_SKIPINVISIBLE | CWP_SKIPDISABLED | CWP_SKIPTRANSPARENT
+        child = int(_ChildWindowFromPointEx(current, _POINT(cx, cy), flags) or 0)
+        if not child or child == current:
+            break
+        current = child
+    return current
+
+
+class PartialSendError(MessageError):
+    """Une partie de l'entrée a été postée avant l'échec : issue INCONNUE. Jamais de repli (physique ou autre
+    technique) par-dessus, il referait l'action (relecture de Codex, 21/10)."""
+
+
+class _Sender:
+    """Postes successifs d'une même action : un échec après le premier poste devient PartialSendError."""
+
+    def __init__(self) -> None:
+        self.sent = 0
+
+    def post(self, hwnd: int, msg: int, wparam: int, lparam: int) -> None:
+        try:
+            post(hwnd, msg, wparam, lparam)
+        except MessageError as error:
+            if self.sent:
+                raise PartialSendError(f"envoi partiel ({self.sent} messages postés) : {error}") from error
+            raise
+        self.sent += 1
+
+
+def post_click(top: int, x: int, y: int, button: str = "left", count: int = 1) -> int:
+    """Clic par messages à l'enfant le plus profond sous (x, y) écran, sans souris réelle. Rend le HWND visé.
+    Double clic : séquence complète DOWN, UP, DBLCLK, UP."""
+    target = deepest_child_at(top, x, y)
+    # WinForms ne lève DoubleClick que si la fenêtre au point (hit-test) est le contrôle lui-même : point recouvert, double clic posté sans effet (banc commun du 22/10, les trois outils) ; rien n'est envoyé, la technique suivante (vraie souris, premier plan bref) s'en charge si elle est permise.
+    if (
+        count >= 2
+        and class_name(target).lower().startswith("windowsforms")
+        and int(_WindowFromPoint(_POINT(x, y)) or 0) != target
+    ):
+        raise MessageError("double clic WinForms à un point recouvert : sans effet par messages, rien n'a été envoyé")
+    down, up, mk, dbl = MOUSE_MESSAGES[button]
+    lp = _lparam_xy(*_message_point(target, x, y))
+    sender = _Sender()
+    sender.post(target, WM_MOUSEMOVE, 0, lp)
+    for i in range(count):
+        sender.post(target, dbl if i == 1 else down, mk, lp)
+        sender.post(target, up, 0, lp)
+    return target
+
+
+WM_MOUSEHWHEEL = 0x020E
+
+
+def post_wheel(top: int, x: int, y: int, delta: int, delta_x: int = 0) -> int:
+    """Molette par message : WM_MOUSEWHEEL (et WM_MOUSEHWHEEL pour delta_x) en coordonnées ÉCRAN."""
+    target = deepest_child_at(top, x, y)
+    sender = _Sender()
+    if delta:
+        sender.post(target, WM_MOUSEWHEEL, (delta & 0xFFFF) << 16, _lparam_xy(x, y))
+    if delta_x:
+        sender.post(target, WM_MOUSEHWHEEL, (delta_x & 0xFFFF) << 16, _lparam_xy(x, y))
+    return target
+
+
+VK_MENU = 0x12
+_kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+_OpenProcess = _kernel32.OpenProcess
+_OpenProcess.restype = wintypes.HANDLE
+_OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+_CloseHandle = _kernel32.CloseHandle
+_WaitForInputIdle = ctypes.WinDLL("user32", use_last_error=True).WaitForInputIdle
+_WaitForInputIdle.restype = wintypes.DWORD
+_WaitForInputIdle.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+SYNCHRONIZE, PROCESS_QUERY_LIMITED_INFORMATION = 0x00100000, 0x1000
+
+
+def _wait_input_idle(hwnd: int, timeout_ms: int) -> None:
+    """Attend que le processus de la fenêtre ait traité ses entrées en file (WaitForInputIdle), au plus timeout_ms."""
+    pid = wintypes.DWORD()
+    _GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    handle = _OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+    if not handle:
+        return
+    try:
+        _WaitForInputIdle(handle, timeout_ms)
+    finally:
+        _CloseHandle(handle)
+
+
+def post_shortcut(target: int, vk: int, modifiers: list[int], hold_s: float = 0.15) -> str:
+    """Raccourci Ctrl/Maj par messages : état clavier du fil de la cible simulé le temps du traitement, touches
+    postées, état restauré seulement quand la cible a traité ses entrées (WaitForInputIdle, au moins hold_s), pour
+    que Ctrl+S ne devienne jamais S. Alt refusé (les raccourcis système attendent WM_SYSKEYDOWN : rien n'est envoyé).
+    Refusé si la cible partage le fil du premier plan (celui de Julien)."""
+    if VK_MENU in modifiers:
+        raise MessageError(
+            "Raccourci avec Alt : pas de technique d'arrière-plan sûre (WM_SYSKEYDOWN), rien n'a été envoyé."
+        )
+    thread = _GetWindowThreadProcessId(target, None)
+    fg = int(_GetForegroundWindow() or 0)
+    if not thread or (fg and _GetWindowThreadProcessId(fg, None) == thread):
+        raise MessageError("Fil de la cible = fil du premier plan : état clavier simulé refusé.")
+    own = _GetCurrentThreadId()
+    if not _AttachThreadInput(own, thread, True):
+        raise MessageError("AttachThreadInput refusé.")
+    # État lu une fois attaché (file d'entrée partagée) : c'est celui de la cible, restauré à l'identique ensuite.
+    saved = (ctypes.c_ubyte * 256)()
+    sender = _Sender()
+    try:
+        _GetKeyboardState(ctypes.byref(saved))
+        state = (ctypes.c_ubyte * 256)(*saved)
+        for m in modifiers:
+            state[m] = 0x80
+        _SetKeyboardState(ctypes.byref(state))
+        for m in modifiers:
+            sender.post(target, WM_KEYDOWN, m, _key_lparam(m, False))
+        sender.post(target, WM_KEYDOWN, vk, _key_lparam(vk, False))
+        sender.post(target, WM_KEYUP, vk, _key_lparam(vk, True))
+        for m in reversed(modifiers):
+            sender.post(target, WM_KEYUP, m, _key_lparam(m, True))
+        started = time.monotonic()
+        _wait_input_idle(target, 2000)  # touches traitées pendant que l'état est posé
+        remaining = hold_s - (time.monotonic() - started)
+        if remaining > 0:
+            time.sleep(remaining)
+    finally:
+        _SetKeyboardState(ctypes.byref(saved))
+        _AttachThreadInput(own, thread, False)
+    return "wm_keydown_modifiers"
+
+
+# --- Activation simulée de Chromium (recette commune, mesurée par NexusClaude le 15/10, banc commun du 21/10) ------
+# Chromium jette le clavier d'une fenêtre inactive, mais tient son état d'activation des MESSAGES qu'il reçoit
+# (WM_NCACTIVATE, WM_ACTIVATE), pas de Windows : ces messages envoyés à sa seule fenêtre, sans activation réelle,
+# suffisent pour que WM_CHAR et WM_KEYDOWN produisent des événements de confiance (input, keydown) dans <input>,
+# <select> et contenteditable ; Ctrl simulé par l'état clavier du fil. Premier plan de Julien intact. Désactivation
+# POSTÉE en sortie : traitée après les caractères encore en file.
+WM_ACTIVATE, WM_NCACTIVATE, WM_CHAR = 0x0006, 0x0086, 0x0102
+CHROMIUM_TOP_CLASS = "Chrome_WidgetWin_"
+SIM_MODIFIERS_HOLD_S = 0.5  # Chromium occulté lit l'état clavier tard (mesuré)
+
+
+def is_chromium_top(hwnd: int) -> bool:
+    return bool(hwnd) and class_name(hwnd).startswith(CHROMIUM_TOP_CLASS) and root_of(hwnd) in (0, hwnd)
+
+
+class simulated_activation:
+    """Bloc où la fenêtre Chromium `top` se croit active sans l'être. Refus (MessageError) si elle est réellement
+    au premier plan (la frappe ordinaire s'applique) ou si ce n'est pas une fenêtre Chromium de premier niveau."""
+
+    def __init__(self, top: int) -> None:
+        self.top = top
+
+    def __enter__(self) -> simulated_activation:
+        if not is_chromium_top(self.top):
+            raise MessageError("Pas une fenêtre Chromium de premier niveau : activation simulée inapplicable.")
+        if root_of(int(_GetForegroundWindow() or 0)) == self.top:
+            raise MessageError("Fenêtre au premier plan : activation simulée inutile.")
+        if send(self.top, WM_NCACTIVATE, 1, 0) is None or send(self.top, WM_ACTIVATE, 1, 0) is None:
+            raise MessageError("La fenêtre ne répond pas aux messages d'activation.")
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        if root_of(int(_GetForegroundWindow() or 0)) != self.top:
+            try:
+                post(self.top, WM_ACTIVATE, 0, 0)
+                post(self.top, WM_NCACTIVATE, 0, 0)
+            except MessageError:
+                pass
+        time.sleep(0.03)
+
+
+def post_chars(target: int, text: str) -> int:
+    """Texte par WM_CHAR (unités UTF-16), sans saut de ligne (il passerait outre la confirmation d'Entrée : refusé,
+    rien n'est envoyé). Un échec après le premier caractère : PartialSendError. Rend le nombre de caractères."""
+    if "\n" in text or "\r" in text:
+        raise MessageError("Saut de ligne : la frappe sans activation ne l'envoie pas (confirmation d'Entrée).")
+    sender = _Sender()
+    for ch in text:
+        data = ch.encode("utf-16-le")
+        for i in range(0, len(data), 2):
+            sender.post(target, WM_CHAR, int.from_bytes(data[i : i + 2], "little"), 1)
+    return len(text)

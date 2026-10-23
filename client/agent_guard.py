@@ -177,7 +177,8 @@ def next_for_act(data: dict[str, Any]) -> str:
     unknown = [s.get("step") for s in steps if s.get("mark") == MARK_UNKNOWN or s.get("status") == "unverified"]
     if unknown:
         return (
-            f"~ effet non vu aux étapes {unknown} : regarde l'image jointe avant toute nouvelle tentative ; "
+            f"~ effet non vu aux étapes {unknown} : lot arrêté, la suite n'a pas été envoyée ; "
+            "regarde l'image jointe ou computer_look avant toute nouvelle tentative ; "
             "ne renvoie pas le même lot (les étapes ✓ et = sont faites)."
         )
     if steps and all(s.get("mark") == MARK_ALREADY for s in steps):

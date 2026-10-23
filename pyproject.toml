@@ -1,6 +1,6 @@
 [project]
 name = "nexus-agy"
-version = "2.10.0"
+version = "2.11.0"
 description = "Computer Use Windows pour Google Antigravity (le pont Chrome vit dans NexusBrowser)"
 requires-python = ">=3.10"
 dependencies = [
@@ -9,6 +9,7 @@ dependencies = [
     "mss>=9.0,<11",
     "pillow>=12.3,<13",
     "uiautomation>=2.0,<3; sys_platform == 'win32'",
+    "websocket-client>=1.8,<2",
 ]
 
 [dependency-groups]

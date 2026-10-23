@@ -3,7 +3,7 @@ name: nexus-computer
 description: Piloter le bureau Windows et ses applications en arrière-plan (computer_look puis computer_act en un lot, cibles par libellé ; chaque réponse dit quoi faire ensuite).
 ---
 
-# NexusAGY Computer (v2.10.0)
+# NexusAGY Computer (v2.11.0)
 
 **RÈGLE D'OR : `computer_look` → `computer_act` en UN lot avec des cibles par libellé ; ne jamais renvoyer un lot sans avoir regardé.**
 
@@ -35,6 +35,7 @@ Agir directement, sans lire le code : jeton commun, arrêt d'urgence, pause de J
 - `next` : une ligne, à suivre telle quelle. **✓** fait, passer à la suite · **=** déjà fait, NE PAS recommencer · **~** effet non vu : regarder l'image jointe avant toute nouvelle tentative · **✗** échec ou refus, rien de plus n'a été fait : cause et quoi essayer.
 - Chaque étape porte `mark` (✓ = ~ ✗) et `verified` (vrai, faux, None). `success` n'est jamais vrai sans relecture exacte (texte relu = texte voulu ; une image qui bouge seule ne prouve rien : ~).
 - `status` du lot = sa pire étape : `success` (tout ✓ ou =), `unverified` (une étape ~), `failed` (une étape ✗).
+- Le lot s'arrête dès la première étape ✗ ou ~ : aucune étape suivante n'est envoyée et rien n'est rejoué. Après ~, regarder pour établir ce qui s'est réellement passé avant de préparer la suite ; une postcondition `expect` relue vraie permet de poursuivre normalement.
 - `target_note` : libellé trouvé seulement en partie (« Ne pas supprimer » pour « Supprimer ») : vérifier sur l'image.
 - `interrupted_by_user` : Julien a repris la main, ne pas relancer. `emergency_stop` : attendre ses instructions.
 

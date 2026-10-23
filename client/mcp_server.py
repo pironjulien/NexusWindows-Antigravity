@@ -15,10 +15,11 @@ from mcp.server.mcpserver import Image, MCPServer
 from mcp.types import ToolAnnotations
 
 try:
-    from . import agent_guard, busy_indicator
+    from . import agent_guard, busy_indicator, journal_commun
 except ImportError:
     import agent_guard
     import busy_indicator
+    import journal_commun
 
 
 class WindowsOnly:
@@ -70,6 +71,7 @@ computer_mcp = CuratedMCPServer(
         "Toujours nommer la fenêtre (hwnd : numéro, titre ou processus) : jamais celle de devant par défaut.\n"
         "Chaque action répond par `next` : ✓ fait (passer à la suite) · = déjà fait (ne pas recommencer) · ~ effet non "
         "vu (regarder l'image jointe) · ✗ échec ou refus (cause et quoi essayer). Le suivre.\n"
+        "Le lot s'arrête sur ~ ou ✗ avant l'étape suivante ; aucun rejeu automatique.\n"
         "Lot identique renvoyé sans computer_look entre les deux : refusé ✗, rien n'est fait (repeat=true pour forcer).\n"
         "Autonomie : toute application est permise (banques et champs mot de passe compris), sauf les gestionnaires de "
         "mots de passe (ni lus ni pilotés) ; "
@@ -229,6 +231,8 @@ def _computer_action_run(
     image: bool,
 ) -> Any:
     window = 0
+    t0 = time.perf_counter()
+    out: dict[str, Any] = {"status": "error"}
     try:
         window = computer_client.resolve_window(hwnd)
         busy_indicator.target(window)  # logo sur l'écran de la fenêtre pilotée
@@ -241,6 +245,7 @@ def _computer_action_run(
                 "next": refusal,
                 "hwnd": window,
             }
+            _journal(kind, window, out, t0)  # refus anti-répétition : compté aussi (relecture de Codex)
             return json.dumps(out, ensure_ascii=False)
         data = call(window)
         if isinstance(data, dict):
@@ -259,6 +264,7 @@ def _computer_action_run(
             out = {"status": "success", "next": agent_guard.NEXT_OK, "data": data}
     except Exception as error:  # noqa: BLE001 - toute erreur revient en clair, avec quoi essayer
         out = _error_payload(error)
+    _journal(kind, window, out, t0)
     note = emergency_stop.hotkey_note()
     if note:
         out["warning"] = note
@@ -268,6 +274,17 @@ def _computer_action_run(
         if picture is not None:
             return [text, picture]
     return text
+
+
+def _journal(kind: str, window: int, out: dict[str, Any], t0: float) -> None:
+    """Journal commun des trois Nexus Windows (shared/journal/FORMAT.md) : chaque appel d'action, sans texte d'écran,
+    jamais bloquant."""
+    try:
+        app = computer_client.get_process_image_path(computer_client.app_pid(window))[1] if window else None
+        cadre = computer_client.win32_controls.family(window) if window else None
+        journal_commun.ecrire(journal_commun.lignes(kind, app, cadre, out, (time.perf_counter() - t0) * 1000))
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _observed(window: Any) -> None:
@@ -359,7 +376,7 @@ def computer_act(
 ) -> Any:
     """Agit en UN lot, en arrière-plan, sur une fenêtre NOMMÉE (hwnd), sans lire le code : jeton commun, arrêt d'urgence et pause de Julien gérés ici.
     Actions : click, double_click, right_click, type, set, clear, check, uncheck, select (option), expand, collapse, menu (path), key, scroll, drag, hover, wait (seconds, text), focus.
-    Cible : target="Libellé exact", "#N", box_2d ou x/y ; libellé ambigu refusé avec les candidats. Étapes ✓ = ~ ✗, status = la pire ; suivre `next`.
+    Cible : target="Libellé exact", "#N", box_2d ou x/y ; libellé ambigu refusé. Étapes ✓ = ~ ✗, status = la pire ; suivre `next`. Lot arrêté sur ~ ou ✗, sans suite envoyée ni rejeu ; regarder avant de reprendre une issue inconnue.
     Actions sortantes (payer, envoyer, publier, transférer, et la touche Entrée qui les déclencherait) : `confirm: true` ET `accord: "<jeton>"` (sur l'étape ou en paramètre) rendu par le premier refus qui décrit l'action exacte. Destructions locales (supprimer définitivement, désinstaller, formater, réinitialiser) : `confirm: true` seul. Ordre explicite de Julien = confirmation, ton initiative = demander d'abord. Même lot sans computer_look : refusé.
     foreground=True : vraie souris/clavier en repli seulement.
     Exemple : {"hwnd": "Commande", "steps": [{"action": "set", "target": "Nom", "text": "Julien"}, {"action": "check", "target": "Accepter"}, {"action": "click", "target": "Valider"}]}"""
@@ -380,7 +397,15 @@ def computer_open_path(path: str) -> str:
     relue. Refusées : URL et protocoles (pages web : nexus-browser).
     Exemple : {"path": "C:\\\\Dev"}"""
     with busy_indicator.working():
-        return _format_computer_result(computer_client.open_path, path_or_url=path)
+        t0 = time.perf_counter()
+        text = _format_computer_result(computer_client.open_path, path_or_url=path)
+        try:
+            out = json.loads(text)
+            window = int((out.get("data") or {}).get("hwnd") or 0) if isinstance(out.get("data"), dict) else 0
+        except (ValueError, TypeError):
+            out, window = {"status": "error"}, 0
+        _journal("open_path", window, out, t0)
+        return text
 
 
 @_register_computer_tool(LOCAL)
@@ -411,7 +436,18 @@ def computer_focus_window(
     """Met une fenêtre au premier plan sous le jeton commun : seulement pour la montrer à Julien, jamais pour préparer
     une action (computer_look et computer_act travaillent sur une fenêtre recouverte)."""
     with busy_indicator.working(hwnd or 0):
-        return _format_computer_result(computer_client.focus_window, hwnd=hwnd, title=title, process_name=process_name)
+        t0 = time.perf_counter()
+        text = _format_computer_result(computer_client.focus_window, hwnd=hwnd, title=title, process_name=process_name)
+        try:
+            out = json.loads(text)
+            data = out.get("data") if isinstance(out.get("data"), dict) else {}
+            window = int(data.get("hwnd") or hwnd or 0)
+            if out.get("status") == "success":
+                data.setdefault("foreground_taken", True)  # mise au premier plan voulue : c'est le geste même
+        except (ValueError, TypeError):
+            out, window = {"status": "error"}, 0
+        _journal("focus_window", window, out, t0)
+        return text
 
 
 @_register_legacy_computer_tool(READ_ONLY)

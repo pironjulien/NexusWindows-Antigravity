@@ -62,3 +62,9 @@ def indicator_off(monkeypatch):
     """Aucun logo « agent au travail » pendant les tests : rien ne s'affiche à l'écran de Julien (test_busy_indicator
     l'éprouve sans fenêtre)."""
     monkeypatch.setenv("NEXUS_WINDOWS_INDICATOR", "0")
+
+
+@pytest.fixture(autouse=True)
+def journal_commun_isole(monkeypatch, tmp_path):
+    """Journal commun des Nexus Windows dans un dossier du test, jamais le vrai journal du poste (NexusJournal)."""
+    monkeypatch.setenv("NEXUS_JOURNAL_HOME", str(tmp_path / "journal-commun"))

@@ -18,6 +18,7 @@ import base64
 import ctypes
 import hashlib
 import io
+import math
 import os
 import re
 import sys
@@ -46,12 +47,22 @@ dwmapi = ctypes.windll.dwmapi
 gdi32 = ctypes.windll.gdi32
 
 try:
-    from . import agent_guard, computer_logger, emergency_stop, physical_input, win32_controls
+    from . import (
+        agent_guard,
+        cdp_wheel,
+        computer_logger,
+        emergency_stop,
+        physical_input,
+        uia_scroll,
+        win32_controls,
+    )
 except ImportError:
     import agent_guard
+    import cdp_wheel
     import computer_logger
     import emergency_stop
     import physical_input
+    import uia_scroll
     import win32_controls
 
 HWND = wintypes.HWND
@@ -1723,30 +1734,52 @@ def close_window(hwnd: int | str) -> dict[str, Any]:
     if is_protected:
         raise PermissionError(f"Fermeture interdite sur {reason}.")
 
-    # 1. Background-first: Try UIA WindowPattern (essential for modern UWP/Store apps that ignore WM_CLOSE)
-    method_used = "wm_close"
+    # 1. Background-first: Try UIA WindowPattern (essential for modern UWP/Store apps that ignore WM_CLOSE).
+    # Motif absent (attesté AVANT l'appel) : WM_CLOSE. Close() lancé puis réponse COM perdue : rien n'est rejoué, la
+    # fermeture est seulement relue (relecture de Codex : deux demandes de fermeture sinon).
+    visible_before = bool(user32.IsWindowVisible(target_hwnd))
+    win_pat = None
     if uia is not None:
         try:
             ctrl = uia.ControlFromHandle(target_hwnd)
-            if ctrl:
-                win_pat = ctrl.GetPattern(uia.PatternId.WindowPattern)
-                if win_pat:
-                    win_pat.Close()
-                    method_used = "uia_window_close"
+            win_pat = ctrl.GetPattern(uia.PatternId.WindowPattern) if ctrl else None
         except Exception:
-            pass
-
-    if method_used != "uia_window_close":
+            win_pat = None
+    method_used = "uia_window_close" if win_pat else "wm_close"
+    close_error = ""
+    if win_pat:
+        try:
+            win_pat.Close()
+        except Exception as error:  # noqa: BLE001 - issue incertaine : relue, jamais rejouée
+            close_error = f"{type(error).__name__}: {error}"
+    else:
         wm_close = 0x0010
         user32.PostMessageW(target_hwnd, wm_close, 0, 0)
 
-    # 2. Strict postcondition verification
-    deadline = time.monotonic() + 0.6
+    # 2. Strict postcondition verification : fenêtre détruite, ou visible avant et masquée après. Une fenêtre déjà
+    # masquée avant la demande ne prouve rien en restant masquée (relecture de Codex).
+    deadline = time.monotonic() + 2.0  # UWP : la fermeture du cadre peut prendre plus d'une demi-seconde
     while time.monotonic() < deadline:
-        if not user32.IsWindow(target_hwnd) or not user32.IsWindowVisible(target_hwnd):
-            return {"success": True, "closed": True, "hwnd": target_hwnd, "method": method_used}
+        gone = not user32.IsWindow(target_hwnd)
+        if gone or (visible_before and not user32.IsWindowVisible(target_hwnd)):
+            result = {"success": True, "verified": True, "closed": True, "hwnd": target_hwnd, "method": method_used}
+            if not gone:
+                result["hidden"] = True  # cadre UWP masqué par Windows plutôt que détruit
+            return result
         time.sleep(0.04)
 
+    if not visible_before or close_error:
+        return {
+            "success": None,
+            "closed": None,
+            "hwnd": target_hwnd,
+            "method": method_used,
+            "message": (
+                "~ fermeture non relue : "
+                + ("fenêtre déjà masquée avant la demande" if not visible_before else f"réponse perdue ({close_error})")
+                + " ; regarder avant de recommencer."
+            ),
+        }
     return {
         "success": False,
         "closed": False,
@@ -1808,6 +1841,37 @@ def _is_protocol(path: str) -> bool:
     return bool(re.match(r"^[a-z][a-z0-9+.-]+:(?![\\/])", path, re.IGNORECASE)) and "://" not in path
 
 
+def _resolve_program(path: str) -> str:
+    """Nom nu de programme (« notepad.exe », « mspaint ») résolu comme le fait Démarrer > Exécuter : PATH (alias
+    d'applications Store de WindowsApps compris), puis App Paths du registre. Rien trouvé, ou chemin déjà existant
+    ou portant un dossier : inchangé (passe 2 du 22/10 : notepad.exe et mspaint.exe refusés, « introuvables »)."""
+    if (
+        not path
+        or Path(path).exists()
+        or os.sep in path
+        or "/" in path
+        or _is_protocol(path)
+        or Path(path).suffix.lower() not in ("", ".exe")
+    ):
+        return path
+    import shutil
+    import winreg
+
+    found = shutil.which(path)
+    if found:
+        return found
+    name = path if path.lower().endswith(".exe") else f"{path}.exe"
+    for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        try:
+            with winreg.OpenKey(hive, rf"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{name}") as key:
+                value = os.path.expandvars(str(winreg.QueryValue(key, None) or "").strip().strip('"'))
+        except OSError:
+            continue
+        if value and Path(value).exists():
+            return value
+    return path
+
+
 def _path_problem(path: str) -> str:
     """Raison de refuser l'ouverture (« » pour tout chemin existant : document, dossier, programme, script,
     raccourci). Une adresse web ou un protocole n'est pas un chemin : la page passe par nexus-browser."""
@@ -1834,6 +1898,7 @@ def open_path(path_or_url: str) -> dict[str, Any]:
     emergency_stop.check()
     ensure_default_desktop()
     path_expanded = os.path.expandvars(os.path.expanduser(str(path_or_url or "").strip().strip('"')))
+    path_expanded = _resolve_program(path_expanded)
     problem = _path_problem(path_expanded)
     if problem:
         raise PermissionError(f"Ouverture refusée de « {path_or_url} » : {problem}. Rien n'a été ouvert.")
@@ -2125,9 +2190,156 @@ def _fast() -> Any:
     return uia_fast
 
 
+_WEB_DOCUMENTS: dict[int, Any] = {}  # fenêtre Chromium → son document racine (publication des changements)
+
+
+def flush_chromium(hwnd: int) -> None:
+    """Recette commune (NexusClaude, banc NexusWindows du 21/10) : une fenêtre Chromium recouverte ne publie ses
+    changements d'accessibilité qu'à une action d'accessibilité ; ScrollIntoView sur son document racine (sans effet
+    visible) les fait publier. Sans cela, un champ ou les options d'une liste dépliée restent absents de l'arbre."""
+    if uia is None or not hwnd or not win32_controls.class_name(hwnd).startswith("Chrome_WidgetWin_"):
+        return
+    if win32_controls.root_of(int(user32.GetForegroundWindow() or 0)) == hwnd:
+        return
+    document: Any = _WEB_DOCUMENTS.get(hwnd)
+    try:
+        if document is None:
+            root: Any = uia.ControlFromHandle(hwnd)
+            document = root.DocumentControl(searchDepth=6) if root is not None else None
+            if document is None:
+                return
+            if not document.Exists(0, 0):
+                return
+            _WEB_DOCUMENTS[hwnd] = document
+        document.GetPattern(uia.PatternId.ScrollItemPattern).ScrollIntoView()
+    except Exception:  # noqa: BLE001 - document remplacé (navigation) ou motif absent : arbre peut-être en retard
+        _WEB_DOCUMENTS.pop(hwnd, None)
+
+
+def _take_focus_quiet(ctrl: Any, target_hwnd: int, timeout_s: float = 0.5, front: int = 0) -> bool:
+    """Focus DOM de l'élément sans activer la fenêtre : action MSAA accSelect(SELFLAG_TAKEFOCUS) (UIA SetFocus, lui,
+    active la fenêtre ; mesuré par NexusClaude). Relu : sans focus prouvé, rien ne doit être tapé. front : fenêtre de
+    Julien, rendue aussitôt si la cible prend le premier plan pendant l'attente."""
+    top = win32_controls.root_of(target_hwnd) or target_hwnd
+    ctrl.GetLegacyIAccessiblePattern().Select(1)
+    deadline = time.monotonic() + timeout_s
+    while True:
+        if front:
+            _hand_back(top, front)
+        flush_chromium(target_hwnd)
+        try:
+            if ctrl.HasKeyboardFocus:
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.03)
+
+
+_SIM_PRIMED: set[int] = set()  # processus Chromium déjà passés par une activation simulée
+WM_SYSCOMMAND, SC_HOTKEY = 0x0112, 0xF150
+
+
+def _hand_back(top: int, front: int, timeout_s: float = 0.4) -> bool:
+    """Rend le premier plan à Julien quand la cible l'a pris (recette NexusClaude, foreground._hand_over) : notre
+    SetForegroundWindow est refusé à un processus d'arrière-plan ; on demande au fil QUI DÉTIENT le premier plan de
+    le rendre lui-même (WM_SYSCOMMAND SC_HOTKEY, traité par DefWindowProc en SetForegroundWindow(lParam) : 2 à 3 ms,
+    mesuré). Seulement si la fenêtre au premier plan est celle de la cible, jamais une fenêtre de Julien."""
+    fg = int(user32.GetForegroundWindow() or 0)
+    if not front or front == top or not user32.IsWindow(front) or win32_controls.root_of(fg) != top:
+        return False
+    user32.PostMessageW(fg, WM_SYSCOMMAND, SC_HOTKEY, front)
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        current = int(user32.GetForegroundWindow() or 0)
+        if current == front:
+            return True
+        if win32_controls.root_of(current) != top:
+            return False  # Julien a choisi une autre fenêtre entre-temps : on ne la lui prend pas
+        time.sleep(0.01)
+    if win32_controls.root_of(int(user32.GetForegroundWindow() or 0)) != top:
+        return False
+    return restore_foreground(front)
+
+
+def _settle_first_activation(top: int, front: int) -> bool:
+    """Première activation simulée d'un processus (recette NexusClaude, mesurée le 20/10) : une application lancée
+    depuis le programme au premier plan garde le droit de prendre le premier plan une fois, et sa première prise de
+    focus l'utilise. On attend ce vol (0,6 s au plus), on rend le premier plan à Julien, puis l'activation simulée
+    est renvoyée. Vrai si elle l'a été (le focus est alors à reprendre). Banc commun du 21/10 : sans cela, Electron
+    gardait le premier plan 2 s, non rendu."""
+    pid = app_pid(top)
+    if not pid or pid in _SIM_PRIMED:
+        return False
+    _SIM_PRIMED.add(pid)
+    deadline = time.monotonic() + 0.6
+    while time.monotonic() < deadline:
+        if win32_controls.root_of(int(user32.GetForegroundWindow() or 0)) == top:
+            break
+        time.sleep(0.01)
+    else:
+        return False
+    _hand_back(top, front)
+    give_back = time.monotonic() + 0.5
+    while win32_controls.root_of(int(user32.GetForegroundWindow() or 0)) == top and time.monotonic() < give_back:
+        time.sleep(0.01)
+    win32_controls.send(top, win32_controls.WM_NCACTIVATE, 1, 0)
+    win32_controls.send(top, win32_controls.WM_ACTIVATE, 1, 0)
+    return True
+
+
+def _give_back_after_simulation(top: int, front: int) -> None:
+    """Filet de sécurité en fin d'activation simulée : si la cible tient le premier plan, il est rendu à Julien."""
+    _hand_back(top, front)
+
+
+def _caret_to_end(ctrl: Any) -> bool:
+    """Caret en fin de texte, sans sélection (TextPattern : plage vide à la fin, sélectionnée). Faux si impossible."""
+    try:
+        document = ctrl.GetTextPattern().DocumentRange
+        document.MoveEndpointByRange(0, document, 1)  # début ← fin : plage vide en fin de texte
+        document.Select()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _chromium_simulated_typing(
+    target_hwnd: int, ctrl: Any, text: str, done: Callable[[], bool], caret_to_end: bool = False
+) -> bool | None:
+    """Frappe Chromium sans activation réelle (recette commune) : activation simulée, focus accSelect relu, WM_CHAR
+    à la fenêtre de premier niveau, effet relu. True relu, None envoyé sans effet relu (jamais renvoyé)."""
+    top = win32_controls.root_of(target_hwnd) or target_hwnd
+    front = user32.GetForegroundWindow()
+    try:
+        with win32_controls.simulated_activation(top):
+            _take_focus_quiet(ctrl, target_hwnd, front=front)
+            _settle_first_activation(top, front)
+            # Focus repris et prouvé JUSTE avant l'envoi (relecture de Codex : un script de la page a pu le déplacer
+            # pendant l'attente du premier plan), caret mis en fin de texte (ajout, jamais au début ni sur une
+            # sélection) ; sans l'un ou l'autre, rien n'est tapé.
+            if not _take_focus_quiet(ctrl, target_hwnd, front=front):
+                raise win32_controls.MessageError("focus sans activation non relu : rien n'a été tapé")
+            if caret_to_end and not _caret_to_end(ctrl):
+                raise win32_controls.MessageError("caret non placé en fin de texte : rien n'a été tapé")
+            emergency_stop.check()
+            win32_controls.post_chars(top, text)
+            deadline = time.monotonic() + 1.5
+            while time.monotonic() < deadline:
+                time.sleep(0.05)
+                flush_chromium(target_hwnd)
+                if done():
+                    return True
+        return None
+    finally:
+        _give_back_after_simulation(top, front)
+
+
 def _window_tree(hwnd: int, max_nodes: int = 3000, time_budget: float = 2.0) -> Any:
     """Arbre UIA d'une fenêtre ; ses listes déroulantes Win32/WinForms OUVERTES sont lues sans leur sous-arbre (qui
-    ferait échouer toute la lecture après ~8 s, mesuré le 16/10)."""
+    ferait échouer toute la lecture après ~8 s, mesuré le 16/10). Chromium recouvert : changements publiés d'abord."""
+    flush_chromium(hwnd)
     return _fast().reader().read_tree(hwnd, max_nodes=max_nodes, time_budget=time_budget,
                                        skip_subtrees=_open_combos(hwnd))  # fmt: skip
 
@@ -2210,7 +2422,7 @@ def _read_uia_elements(
                 report["status"] = "truncated"
                 report["reason"] = tree.reason
             depth_cut = False
-            for node in tree.nodes[1:]:
+            for tree_index, node in enumerate(tree.nodes[1:], start=1):
                 ctype = node.control_type
                 rect = node.rect
                 if f"{ctype}Control" not in INTERACTIVE_CONTROL_TYPES or rect is None or _outside(rect, win_rect):
@@ -2249,7 +2461,12 @@ def _read_uia_elements(
                     "framework": node.framework,
                     "class_name": str(node.props.get("class_name") or ""),
                     "props": node.props,
+                    "tree_index": tree_index,
                 }
+                parent = node.parent
+                if ctype == "Edit" and parent is not None and 0 <= parent < len(tree.nodes):
+                    if tree.nodes[parent].control_type == "ComboBox":
+                        infos[idx]["combo_parent"] = parent  # champ d'une liste déroulante modifiable
                 if ctype == "ListItem":
                     owner = _list_owner(tree.nodes, node)
                     if owner is not None:
@@ -2533,7 +2750,13 @@ def window_fingerprint(hwnd: int, with_tree: bool = False) -> dict[str, Any] | N
             image = img.convert("L")
     except Exception:  # noqa: BLE001
         image = None
-    out = {"title": _window_text(hwnd), "windows": _process_windows(app_pid(hwnd)), "image": image}
+    rect = get_window_rect(hwnd)
+    out = {
+        "title": _window_text(hwnd),
+        "windows": _process_windows(app_pid(hwnd)),
+        "image": image,
+        "rect": (rect["left"], rect["top"], rect["width"], rect["height"]),
+    }
     if with_tree:
         out["tree"] = _tree_digest(hwnd)
     return out
@@ -2549,10 +2772,14 @@ def _fingerprint_changed(before: dict[str, Any] | None, after: dict[str, Any] | 
         return "titre de la fenêtre"
     if before["windows"] != after["windows"]:
         return "fenêtres de l'application"
+    # Taille : le RECTANGLE de la fenêtre, jamais la taille de deux captures (banc du 21/10, 23:42 : deux captures de
+    # tailles différentes d'une fenêtre recouverte ont validé un clic que le labo n'avait pas reçu).
+    if before.get("rect") is not None and after.get("rect") is not None and before["rect"] != after["rect"]:
+        return "taille de la fenêtre"
     a, b = before.get("image"), after.get("image")
     if a is not None and b is not None:
         if a.size != b.size:
-            return "taille de la fenêtre"
+            return ""  # captures incomparables : rien n'est prouvé
         from PIL import ImageChops
 
         def threshold(v: int) -> int:
@@ -2568,21 +2795,28 @@ PIXEL_EFFECT = "image de la fenêtre"
 PIXEL_ONLY_NOTE = "seule l'image a changé (animation possible) : effet non prouvé, vérifier sur l'image"
 
 
-def _wait_window_effect(hwnd: int, before: dict[str, Any] | None, timeout: float = EFFECT_WAIT_S):
+STRUCTURAL = ("titre de la fenêtre", "fenêtres de l'application", "taille de la fenêtre")
+
+
+def _wait_window_effect(
+    hwnd: int, before: dict[str, Any] | None, timeout: float = EFFECT_WAIT_S, structural_only: bool = False
+):
     """(True, ce qui a changé) dès qu'un effet PROUVÉ apparaît (titre, fenêtres de l'application, taille, arbre UI
     Automation) ; des pixels changés seuls ne prouvent rien (animation, survol, curseur) : (None, note) ; (None, "")
-    sans effet visible — l'issue reste inconnue, jamais affirmée."""
+    sans effet visible — l'issue reste inconnue, jamais affirmée. ``structural_only`` : seuls titre, fenêtres et
+    taille prouvent (double clic posté : son premier clic sélectionne l'élément, ce qui change l'arbre sans prouver le
+    double clic ; banc du 21/10, 23:42 : sélection seule prise pour un double clic réussi)."""
     if before is None:
         return None, ""
     deadline = time.monotonic() + timeout
     pixels = False
     while True:
         what = _fingerprint_changed(before, window_fingerprint(hwnd))
-        if what and what != PIXEL_EFFECT:
+        if what and what != PIXEL_EFFECT and (not structural_only or what in STRUCTURAL):
             return True, what
         pixels = pixels or what == PIXEL_EFFECT
         if time.monotonic() >= deadline:
-            tree_before = before.get("tree")
+            tree_before = None if structural_only else before.get("tree")
             if tree_before is not None:
                 tree_after = _tree_digest(hwnd)
                 if tree_after is not None and tree_after != tree_before:
@@ -2768,6 +3002,9 @@ def _uia_expand_or_collapse(ctrl: Any) -> str:
     return "uia"
 
 
+POSTED_NO_RETRY = frozenset({"BN_CLICKED"})  # banc commun du 21/10 : bouton qui ouvre une boîte modale
+
+
 def _run_chain(
     chain: list[tuple[str, Callable[[], Any]]],
     verify: Callable[[Any], tuple[bool | None, str]],
@@ -2782,6 +3019,9 @@ def _run_chain(
             detail = run()
         except (emergency_stop.EmergencyStopError, UserInterruptError):
             raise
+        except win32_controls.PartialSendError as error:
+            # Une partie est partie : issue inconnue, jamais une technique de plus (elle referait l'action).
+            return {"technique": name, "detail": str(error), "verified": None, "pending": True, "tried": tried}
         except Exception as error:  # noqa: BLE001 - technique inapplicable : la suivante
             tried.append({"technique": name, "error": f"{type(error).__name__}: {error}"})
             continue
@@ -2792,6 +3032,10 @@ def _run_chain(
             return {"technique": name, "detail": detail, "verified": True, "verified_by": "état déjà voulu",
                     "already": True, "tried": tried}  # fmt: skip
         verified, how = verify(detail)
+        if verified is False and name in POSTED_NO_RETRY:
+            # Message posté : traité plus tard, et son effet peut être ailleurs (boîte modale ouverte). « Absent »
+            # n'est pas prouvé : inconnu, jamais une seconde technique (elle doublerait l'action).
+            verified, how = None, "message posté, effet non relu (aucune autre technique tentée)"
         if verified is False and how != "partial":
             tried.append({"technique": name, "error": f"sans effet relu ({how})" if how else "sans effet relu"})
             continue
@@ -2858,7 +3102,16 @@ def _click_plan(
 
     uia_chain: list[tuple[str, Callable[[], Any]]] = []
     win32_button = fam == "Win32" and own_kind in ("button", "checkbox", "radio")
-    if has("has_invoke") and not win32_button and not (native and role == "ListItem") and not toggle_combo:
+    # Élément de liste hors Win32/WinForms (WPF, Chromium…) : UIA Select seul, idempotent et relu. Invoke puis Select
+    # sélectionnait deux fois (banc commun du 21/10 : « liste Bravo » reçu deux fois en Electron, déclaré ✓).
+    list_select = role == "ListItem" and not native and has("has_selection_item")
+    if (
+        has("has_invoke")
+        and not win32_button
+        and not (native and role == "ListItem")
+        and not toggle_combo
+        and not list_select
+    ):
         uia_chain.append(("UIA Invoke", lambda: _invoke_with_timeout(ctrl)))
     if has("has_toggle"):
         uia_chain.append(("UIA Toggle", lambda: _UIA_TOGGLE(ctrl)))
@@ -2867,7 +3120,10 @@ def _click_plan(
     if has("has_expand"):
         uia_chain.append(("UIA Expand/Collapse", lambda: _uia_expand_or_collapse(ctrl)))
 
-    if fam == "Win32" or item_combo or toggle_combo:
+    # Bouton poussoir WinForms : BN_CLICKED POSTÉ d'abord. UIA Invoke est synchrone : un bouton qui ouvre une boîte
+    # modale le bloque, puis le repli BN_CLICKED rouvrait la boîte (banc commun du 21/10 : « modale ouverte » ×2).
+    winforms_push = fam == "WinForms" and any(name == "BN_CLICKED" for name, _ in messages)
+    if fam == "Win32" or item_combo or toggle_combo or winforms_push:
         chain = messages + uia_chain
     elif fam == "WinForms":
         chain = uia_chain + messages
@@ -2914,7 +3170,11 @@ def _click_plan(
                 if _native_kind(host) == "listbox" and name and win32_controls.listbox_selected(host) == name:
                     return True, "sélection de la liste relue"
                 if time.monotonic() >= deadline:
-                    return (False, "non sélectionné") if state.get("selected") is False else (None, "")
+                    # Chromium publie son arbre en retard : « non sélectionné » relu n'y prouve pas l'absence d'effet
+                    # (banc commun du 22/10 : UIA Select reçu, relu faux, puis clic physique = « liste Bravo » ×2).
+                    if state.get("selected") is False and fam != "Chromium":
+                        return False, "non sélectionné"
+                    return None, "sélection non relue à temps (Chromium)" if fam == "Chromium" else ""
                 time.sleep(EFFECT_POLL_S)
         if stateful_expand:
             after = _read_state(ctrl, info).get("expand")
@@ -3197,6 +3457,19 @@ def _label_at(target_hwnd: int, sx: int, sy: int) -> str:
     return best if len(best.split()) <= BUTTON_LABEL_MAX_WORDS else ""
 
 
+def _chromium_single_line(ctrl: Any, info: dict[str, Any]) -> bool:
+    """Champ <input> d'une ligne dans Chromium/Electron : UIA Value y émet les événements input (mesuré par le banc
+    commun NexusWindows et NexusClaude). Jamais un champ multiligne ni un éditeur riche : indiscernables pour UIA, la
+    valeur y serait posée sans que la page le sache (faux succès)."""
+    if info.get("type") != "Edit" or not (info.get("props") or {}).get("has_value"):
+        return False
+    try:
+        aria = str(getattr(ctrl, "AriaProperties", "") or "").lower()
+    except Exception:  # noqa: BLE001 - propriété illisible : prudence
+        return False
+    return "multiline=true" not in aria
+
+
 def _background_writable(ctrl: Any, info: dict[str, Any], target_hwnd: int) -> bool:
     """Champ qu'on sait remplir en arrière-plan (Edit natif, ou motif Value hors Chromium/Electron)."""
     if info.get("type") not in TEXT_ROLES:
@@ -3208,7 +3481,7 @@ def _background_writable(ctrl: Any, info: dict[str, Any], target_hwnd: int) -> b
     props = info.get("props") or {}
     if props.get("readonly"):
         return False
-    return bool(props.get("has_value")) and not is_electron_window(target_hwnd)
+    return bool(props.get("has_value")) and (not is_electron_window(target_hwnd) or _chromium_single_line(ctrl, info))
 
 
 def _designate(target_hwnd: int, ctrl: Any, info: dict[str, Any]) -> None:
@@ -3337,7 +3610,28 @@ def _physical_point_click(
     foreground: bool,
     t0: float,
 ) -> dict[str, Any]:
-    """Point sans élément connu (canevas, application sans UIA) : vraie souris, en repli autorisé seulement."""
+    """Point sans élément connu (canevas, application sans UIA) : clic par messages en Win32/WinForms (recette
+    commune du banc NexusWindows, premier plan intact), sinon vraie souris, en repli autorisé seulement."""
+    if win32_controls.family(target_hwnd) in win32_controls.MESSAGE_CLICK_FAMILIES:
+        before = window_fingerprint(target_hwnd, with_tree=True)
+        try:
+            hit = win32_controls.post_click(target_hwnd, sx, sy, button, click_count)
+        except win32_controls.PartialSendError:
+            hit = -1  # envoi partiel : issue inconnue, relue ci-dessous, jamais de vraie souris par-dessus
+        except win32_controls.MessageError:
+            hit = 0
+        if hit:
+            # Envoyé : jamais renvoyé par la vraie souris (un effet lent serait doublé), même non relu.
+            verified, how = _wait_window_effect(
+                target_hwnd, before, structural_only=click_count > 1 or button != "left"
+            )
+            result = {"success": _success(verified), "method": "win32_post_click", "technique": "clic par messages",
+                      "physical": False, **origin, "verified": verified,
+                      "timing_ms": round((time.perf_counter() - t0) * 1000, 2)}  # fmt: skip
+            if how:
+                result["verified_by"] = how
+            _log("click", "win32_post_click", target_hwnd, t0, result, {"screen_coords": (sx, sy)})
+            return result
     _physical_gate(target_hwnd, foreground, "clic par coordonnées sur une zone sans élément UI Automation")
     before = window_fingerprint(target_hwnd, with_tree=True)
     _physical_click_at(target_hwnd, sx, sy, button, click_count, restore_focus, aim != "screen_coordinates")
@@ -3391,6 +3685,31 @@ def _click_element(
         }
         _log("click", "field_designation", target_hwnd, t0, result, details)
         return result
+
+    if not left_single and win32_controls.family(target_hwnd) in win32_controls.MESSAGE_MOUSE_FAMILIES:
+        # Clic droit et double clic en Win32/WinForms : messages postés au centre de l'élément (recette commune du
+        # banc NexusWindows : le menu contextuel WinForms s'ouvre sans toucher au premier plan, sa commande se choisit
+        # ensuite par libellé). Envoyé une fois : jamais renvoyé par la vraie souris.
+        try:
+            r = ctrl.BoundingRectangle
+            cx, cy = point or ((r.left + r.right) // 2, (r.top + r.bottom) // 2)
+            before = window_fingerprint(target_hwnd, with_tree=True)
+            try:
+                win32_controls.post_click(target_hwnd, cx, cy, button.lower(), click_count)
+            except win32_controls.PartialSendError:
+                pass  # envoi partiel : issue inconnue, relue ci-dessous, jamais d'autre technique par-dessus
+        except (win32_controls.MessageError, AttributeError):
+            pass
+        else:
+            # double clic / clic droit : la sélection ou le focus nés du premier clic ne prouvent rien
+            verified, how = _wait_window_effect(target_hwnd, before, structural_only=True)
+            posted = {"success": _success(verified), "verified": verified, "method": "win32_post_click",
+                      "technique": "clic par messages", "physical": False, **base,
+                      "timing_ms": round((time.perf_counter() - t0) * 1000, 2)}  # fmt: skip
+            if how:
+                posted["verified_by"] = how
+            _log("click", "win32_post_click", target_hwnd, t0, posted, details)
+            return posted
 
     fam, chain, verify = _click_plan(ctrl, info, target_hwnd)
     base["family"] = fam
@@ -3681,7 +4000,8 @@ def type_text(
     # 1. Arrière-plan : messages Win32 / UIA Value selon la famille, valeur relue (aucun vol de focus)
     tried: list[dict[str, str]] = []
     if ctrl is not None and (
-        method in ("uia", "message") or (method == "auto" and not is_electron_window(target_hwnd))
+        method in ("uia", "message")
+        or (method == "auto" and (not is_electron_window(target_hwnd) or _chromium_single_line(ctrl, info)))
     ):
         fam, chain, verify, expected = _text_plan(ctrl, info, target_hwnd, text, clear_first, method, secret)
         out = _run_chain(chain, verify, user32.GetForegroundWindow())
@@ -3739,6 +4059,52 @@ def type_text(
         if method in ("uia", "message"):
             errors = "; ".join(f"{t['technique']} : {t['error']}" for t in out["tried"]) or "aucune technique"
             raise RuntimeError(f"L'élément {_describe(info)} ne prend pas la saisie en arrière-plan ({errors}).")
+
+    # 1 bis. Chromium (éditeur riche, champ multiligne) : frappe sous activation simulée (recette commune), en ajout
+    # seulement (remplacer exigerait une sélection préalable). Envoyé une fois, jamais renvoyé par le vrai clavier.
+    if (
+        ctrl is not None
+        and not secret
+        and not submit
+        and "\n" not in text
+        and "\r" not in text
+        and method == "auto"
+        and win32_controls.is_chromium_top(win32_controls.root_of(target_hwnd) or target_hwnd)
+    ):
+        before_value = _norm_text(_read_state(ctrl, info).get("value"))
+        if not clear_first or not before_value:
+            wanted = _norm_text(before_value + text)
+            try:
+                done = _chromium_simulated_typing(
+                    target_hwnd,
+                    ctrl,
+                    text,
+                    lambda: _norm_text(_read_state(ctrl, info).get("value")) == wanted,
+                    caret_to_end=bool(before_value),
+                )
+            except win32_controls.PartialSendError as error:
+                # Une partie est partie : issue inconnue, rendue telle quelle ; jamais de repli physique par-dessus.
+                partial: dict[str, Any] = {
+                    "success": None, "method": "chromium_simulated_typing", "verified": None,
+                    "technique": "frappe sans activation (activation simulée)", "family": "Chromium",
+                    "target": _describe(info), "message": f"Envoi partiel : {error}. Regarder avant toute reprise.",
+                    "timing_ms": round((time.perf_counter() - t0) * 1000, 2),
+                }  # fmt: skip
+                _log("type_text", "chromium_simulated_typing", target_hwnd, t0, partial, {"target": _describe(info)})
+                return partial
+            except win32_controls.MessageError as error:
+                tried.append({"technique": "frappe sans activation", "error": str(error)})
+            else:
+                sim_result: dict[str, Any] = {
+                    "success": _success(done), "method": "chromium_simulated_typing",
+                    "technique": "frappe sans activation (activation simulée)", "family": "Chromium",
+                    "target": _describe(info), "char_count": len(text), "verified": done,
+                    "timing_ms": round((time.perf_counter() - t0) * 1000, 2),
+                }  # fmt: skip
+                if done:
+                    sim_result["verified_by"] = "texte relu dans le champ"
+                _log("type_text", "chromium_simulated_typing", target_hwnd, t0, sim_result, {"target": _describe(info)})
+                return sim_result
 
     # 2. Repli physique (foreground=True seulement) : frappe Unicode, presse-papiers en dernier recours
     what = f"saisie dans {_describe(info)}" if ctrl is not None else "saisie sans champ connu (aucun champ retenu)"
@@ -3974,6 +4340,51 @@ def _background_keys(
         return res
 
     fam = win32_controls.family(target_hwnd)
+    top = win32_controls.root_of(target_hwnd) or target_hwnd
+    if len(main) == 1 and win32_controls.is_chromium_top(top):
+        # Chromium : touche ou raccourci sous activation simulée (recette commune ; Ctrl tenu le temps que Chromium
+        # occulté lise l'état clavier). Envoyé une fois, jamais renvoyé par le vrai clavier.
+        before = window_fingerprint(target_hwnd, with_tree=True)
+        mod_vks = [vk for vk, _ext in vk_entries[:-1]]
+        front = int(user32.GetForegroundWindow() or 0)
+        try:
+            with win32_controls.simulated_activation(top):
+                _settle_first_activation(top, front)
+                if mod_vks:
+                    method = win32_controls.post_shortcut(top, vk_entries[-1][0], mod_vks,
+                                                          win32_controls.SIM_MODIFIERS_HOLD_S)  # fmt: skip
+                else:
+                    method = win32_controls.post_key(top, vk_entries[-1][0])
+        except win32_controls.PartialSendError:
+            method = "envoi partiel"  # issue inconnue, relue ci-dessous, jamais le vrai clavier par-dessus
+        except win32_controls.MessageError:
+            return None
+        finally:
+            _give_back_after_simulation(top, front)
+        verified, how = _wait_window_effect(target_hwnd, before)
+        chromium_keys: dict[str, Any] = {"success": _success(verified), "verified": verified, "method": method,
+                                         "technique": "touches sans activation (activation simulée)", "keys": keys,
+                                         "sent": True}  # fmt: skip
+        if how:
+            chromium_keys["verified_by"] = how
+        return chromium_keys
+    if mods and len(main) == 1 and fam in win32_controls.MESSAGE_SHORTCUT_FAMILIES:
+        # Raccourci Ctrl/Alt/Maj : état clavier du fil cible simulé (recette commune du banc NexusWindows).
+        mod_vks = [vk for vk, _ext in vk_entries[:-1]]
+        target = win32_controls.keyboard_target(target_hwnd)
+        before = window_fingerprint(target_hwnd, with_tree=True)
+        try:
+            method = win32_controls.post_shortcut(target, vk_entries[-1][0], mod_vks)
+        except win32_controls.PartialSendError:
+            method = "envoi partiel"  # issue inconnue, relue ci-dessous, jamais le vrai clavier par-dessus
+        except win32_controls.MessageError:
+            return None
+        verified, how = _wait_window_effect(target_hwnd, before)
+        shortcut: dict[str, Any] = {"success": _success(verified), "verified": verified, "method": method,
+                                    "technique": "raccourci par messages", "keys": keys, "sent": True}  # fmt: skip
+        if how:
+            shortcut["verified_by"] = how
+        return shortcut
     if mods or len(main) != 1 or fam not in KEY_MESSAGE_FAMILIES:
         return None
     vk = vk_entries[-1][0]
@@ -4193,7 +4604,110 @@ def scroll(
                 result["message"] = "Position de défilement inchangée (déjà en butée ?)."
             return result
 
-    # 2. Molette physique (repli autorisé seulement : fenêtre visée + foreground=True, jamais d'office)
+    # 1 bis. Point donné, interface qui ignore la molette postée (WPF, UWP, WinUI…) : défilement SÉMANTIQUE du
+    # conteneur défilable sous le point, cherché dans le sous-arbre de la fenêtre (recette commune du banc NexusWindows,
+    # comme Claude et Codex ; banc du 21/10, 23:42). Refus (rien envoyé) : on continue ; envoyé : jamais une autre
+    # technique ensuite.
+    family = win32_controls.family(target_hwnd)
+    if (
+        (delta_y or delta_x)
+        and x is not None
+        and y is not None
+        and family not in (win32_controls.MESSAGE_MOUSE_FAMILIES | {"Chromium"})
+    ):
+        if coords == "screen":
+            sem_point = (int(x), int(y))
+        else:
+            rect = get_window_rect(target_hwnd)
+            sem_point = (rect["left"] + int(x), rect["top"] + int(y))
+        try:
+            outcome = uia_scroll.at_point(
+                win32_controls.root_of(target_hwnd) or target_hwnd, sem_point[0], sem_point[1], delta_y, delta_x,
+                app_pid(target_hwnd),
+            )  # fmt: skip
+        except uia_scroll.NotApplicable:
+            outcome = None
+        if outcome is not None:
+            result = {"success": _success(outcome["verified"]), "method": "uia_scroll_at_point",
+                      "technique": "défilement UI Automation au point", "physical": False, "delta_y": delta_y,
+                      "delta_x": delta_x, "verified": outcome["verified"],
+                      "scroll_percent": {"before": outcome.get("before"), "after": outcome.get("after")}}  # fmt: skip
+            if outcome.get("message"):
+                result["message"] = outcome["message"]
+            return result
+
+    # 2. Molette par message en Win32/WinForms (recette commune du banc NexusWindows : premier plan intact), au point
+    # donné ou au centre de l'élément visé.
+    if (delta_y or delta_x) and win32_controls.family(target_hwnd) in win32_controls.MESSAGE_MOUSE_FAMILIES:
+        wheel_point: tuple[int, int] | None = None
+        if x is not None and y is not None:
+            if coords == "screen":
+                wheel_point = (int(x), int(y))
+            else:
+                rect = get_window_rect(target_hwnd)
+                wheel_point = (rect["left"] + int(x), rect["top"] + int(y))
+        elif element_index is not None:
+            crect = get_cached_element(element_index, target_hwnd).BoundingRectangle
+            wheel_point = ((crect.left + crect.right) // 2, (crect.top + crect.bottom) // 2)
+        if wheel_point is not None:
+            before = window_fingerprint(target_hwnd, with_tree=True)
+            try:
+                win32_controls.post_wheel(target_hwnd, wheel_point[0], wheel_point[1], delta_y * 120, delta_x * 120)
+                sent = True
+            except win32_controls.PartialSendError:
+                sent = True  # envoi partiel : issue inconnue, jamais la vraie molette par-dessus
+            except win32_controls.MessageError:
+                sent = False
+            if sent:  # jamais renvoyé par la vraie molette ensuite : un effet lent serait doublé
+                verified, how = _wait_window_effect(target_hwnd, before)
+                result = {"success": _success(verified), "method": "win32_post_wheel", "technique": "molette par message",
+                          "physical": False, "delta_y": delta_y, "verified": verified}  # fmt: skip
+                if how:
+                    result["verified_by"] = how
+                return result
+
+    # 3. Chromium/Electron/Edge : molette par DevTools (recette B du banc commun, Codex, prouvée le 21/10), au point
+    # donné ou au centre de l'élément visé, seulement si le port, la page et la liaison fenêtre ↔ page sont prouvés.
+    # Refus (rien envoyé) : on continue vers le refus habituel ; envoyée : jamais une autre technique ensuite.
+    if (delta_y or delta_x) and win32_controls.family(target_hwnd) == "Chromium":
+        cdp_point: tuple[int, int] | None = None
+        if x is not None and y is not None:
+            if coords == "screen":
+                cdp_point = (int(x), int(y))
+            else:
+                rect = get_window_rect(target_hwnd)
+                cdp_point = (rect["left"] + int(x), rect["top"] + int(y))
+        elif element_index is not None:
+            crect = get_cached_element(element_index, target_hwnd).BoundingRectangle
+            cdp_point = ((crect.left + crect.right) // 2, (crect.top + crect.bottom) // 2)
+        if cdp_point is not None:
+            # Empreinte prise APRÈS la preuve par titre (titre de la fenêtre revenu), juste avant l'envoi : le nonce ne
+            # peut jamais passer pour l'effet de la molette (relecture de Codex, 21/10).
+            snapshot: dict[str, Any] = {}
+            try:
+                sent = cdp_wheel.wheel(
+                    win32_controls.root_of(target_hwnd) or target_hwnd, cdp_point[0], cdp_point[1], delta_y, delta_x,
+                    check=emergency_stop.check,
+                    before_send=lambda: snapshot.update(before=window_fingerprint(target_hwnd, with_tree=True)),
+                )  # fmt: skip
+            except cdp_wheel.NotApplicable as refusal:
+                if getattr(refusal, "title_left", False):  # rien envoyé, mais la page peut garder le titre aléatoire
+                    return {"success": False, "method": "devtools_wheel", "physical": False, "verified": None,
+                            "message": str(refusal)}  # fmt: skip
+                sent = None
+            except cdp_wheel.Uncertain as error:
+                return {"success": None, "method": "devtools_wheel", "technique": "molette DevTools", "physical": False,
+                        "verified": None, "message": str(error)}  # fmt: skip
+            if sent is not None:  # accusée par la page : partie une fois, effet relu sur l'image, jamais rejouée
+                verified, how = _wait_window_effect(target_hwnd, snapshot.get("before"))
+                result = {"success": _success(verified), "method": "devtools_wheel", "technique": sent["technique"],
+                          "physical": False, "mechanism": sent["mechanism"], "delta_y": delta_y, "delta_x": delta_x,
+                          "verified": verified, "surface": sent.get("surface")}  # fmt: skip
+                if how:
+                    result["verified_by"] = how
+                return result
+
+    # 4. Molette physique (repli autorisé seulement : fenêtre visée + foreground=True, jamais d'office)
     _physical_gate(
         target_hwnd,
         foreground,
@@ -4229,16 +4743,43 @@ def scroll(
         inp.union.mi.mouseData = delta_x * 120
         inputs.append(inp)
 
-    before = window_fingerprint(target_hwnd, with_tree=True)
+    # Preuve d'une molette physique : la POSITION relue du conteneur visé, jamais le titre de la fenêtre ou l'arbre
+    # (banc commun du 22/10 : le titre changé par l'application passait pour un défilement réussi). Sans conteneur
+    # lisible : issue non vérifiée, jamais affirmée.
+    read = uia_scroll.position_reader(
+        win32_controls.root_of(target_hwnd) or target_hwnd, point[0], point[1], delta_y != 0, app_pid(target_hwnd)
+    )
+    # Sens attendu : vers le bas (delta_y < 0) ou la droite (delta_x > 0) = pourcentage qui augmente.
+    forward = delta_y < 0 if delta_y != 0 else delta_x > 0
+
+    def wheel_position() -> float | None:
+        """Pourcentage valide [0, 100] ; -1 (UIA NoScroll), non fini ou illisible : aucune preuve (relecture de Codex du
+        22/10 14:31 : 25 → -1 passait pour un défilement)."""
+        try:
+            value = read() if read else None
+        except Exception:  # noqa: BLE001 - illisible : pas de preuve
+            return None
+        return value if value is not None and math.isfinite(value) and 0.0 <= value <= 100.0 else None
+
+    verified, how = None, ""
     with FocusGuard(target_hwnd, restore=restore_focus):
         _move_cursor(*point)
         time.sleep(0.02)
-
+        # Référence lue SOUS la garde, après l'activation et le curseur, juste avant l'envoi ; effet relu sous la même
+        # garde, avant la restitution (relecture de Codex du 22/10 14:31).
+        position_before = wheel_position()
         if inputs:
             _checkpoint()
             _send_inputs(inputs)
-
-    verified, how = _wait_window_effect(target_hwnd, before)
+        if position_before is not None:
+            deadline = time.monotonic() + EFFECT_WAIT_S
+            while time.monotonic() < deadline:
+                after = wheel_position()
+                if after is not None and after != position_before:
+                    if (after > position_before) == forward:
+                        verified, how = True, f"position relue ({position_before:g} % → {after:g} %)"
+                    break
+                time.sleep(EFFECT_POLL_S)
     result = {
         "success": _success(verified),
         "method": "mouse_wheel",
@@ -4608,24 +5149,29 @@ def _uia_select_option(ctrl: Any, option: str, target_hwnd: int = 0) -> str:
             while chosen is None and time.monotonic() < deadline:
                 emergency_stop.check()
                 time.sleep(0.12)
+                flush_chromium(target_hwnd)  # Chromium recouvert : options dépliées publiées
                 chosen = _pick_item(_dedup_items(_uia_descendants(ctrl)), option)
                 if chosen is None and pid:
                     popups = [h for h in _process_windows(pid) if h not in windows_before]
                     chosen = _pick_item(_popup_items(popups), option)
-        if chosen is None:
+        typed_select = chosen is None and win32_controls.is_chromium_top(
+            win32_controls.root_of(target_hwnd) or target_hwnd
+        )  # <select> Chromium : options non publiées en arrière-plan → frappe du libellé, liste refermée d'abord
+        if chosen is None and not typed_select:
             raise LookupError(f"Option « {option} » introuvable dans la liste.")
-        element, props = chosen
-        wrapped = _wrap_element(element, {"type_id": props.get("control_type")})
-        if props.get("offscreen") and props.get("has_scroll_item"):
-            try:
-                wrapped.GetScrollItemPattern().ScrollIntoView()
-            except Exception:  # noqa: BLE001 - option choisie quand même ; la relecture tranche
-                pass
-        selection = wrapped.GetSelectionItemPattern()
-        if selection:
-            selection.Select()
-        else:
-            _invoke_with_timeout(wrapped)
+        if chosen is not None:
+            element, props = chosen
+            wrapped = _wrap_element(element, {"type_id": props.get("control_type")})
+            if props.get("offscreen") and props.get("has_scroll_item"):
+                try:
+                    wrapped.GetScrollItemPattern().ScrollIntoView()
+                except Exception:  # noqa: BLE001 - option choisie quand même ; la relecture tranche
+                    pass
+            selection = wrapped.GetSelectionItemPattern()
+            if selection:
+                selection.Select()
+            else:
+                _invoke_with_timeout(wrapped)
     finally:
         if opened and expand:
             try:
@@ -4633,6 +5179,26 @@ def _uia_select_option(ctrl: Any, option: str, target_hwnd: int = 0) -> str:
                     expand.Collapse()
             except Exception:  # noqa: BLE001
                 pass
+    if chosen is None:
+        return _chromium_select_by_typing(ctrl, option, target_hwnd)
+    return "uia"
+
+
+def _combo_text(ctrl: Any) -> str:
+    try:
+        return " ".join(str(ctrl.GetValuePattern().Value or "").split())
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _chromium_select_by_typing(ctrl: Any, option: str, target_hwnd: int) -> str:
+    """<select> Chromium (recette commune, NexusClaude) : ses options ne sont pas exposées et sa liste ne s'ouvre pas
+    en arrière-plan. Focus puis frappe du libellé sous activation simulée : la recherche au clavier du <select>
+    choisit l'option et émet `change` comme un humain. Relu ; envoyé sans relecture = inconnu, jamais renvoyé."""
+    wanted = " ".join(option.split()).lower()
+    done = _chromium_simulated_typing(target_hwnd, ctrl, option, lambda: _combo_text(ctrl).lower() == wanted)
+    if done is None:
+        return "pending"
     return "uia"
 
 
@@ -5076,6 +5642,7 @@ def choose_label(
     roles: tuple[str, ...] = (),
     what: str = "élément",
     acting: bool = False,
+    combo_of: Callable[[Any], Any] | None = None,
 ) -> tuple[Any, str]:
     """Choix SANS hasard : exact unique d'abord ; plusieurs exacts → refus (jamais un partiel à la place) ; aucun exact
     et un seul partiel → accepté et signalé ; plusieurs partiels → refus. Le rôle attendu par l'action (`roles`)
@@ -5090,6 +5657,14 @@ def choose_label(
             narrowed = [key for key in tier if role_of(key) in roles]
             if len(narrowed) == 1:
                 tier = narrowed
+            elif "Edit" in roles and combo_of is not None and len(narrowed) == 2:
+                # Liste déroulante modifiable : la ComboBox et SON champ Edit (enfant direct relu dans l'arbre) portent
+                # le même nom (« Nom du fichier : » des boîtes Ouvrir/Enregistrer, passe 2 du 22/10) ; le texte va au
+                # champ. Deux champs distincts restent ambigus (relecture de Codex).
+                edit = next((key for key in narrowed if role_of(key) == "Edit"), None)
+                combo = next((key for key in narrowed if role_of(key) == "ComboBox"), None)
+                if edit is not None and combo is not None and combo_of(edit) == combo:
+                    tier = [edit]
         if len(tier) == 1:
             key = tier[0]
             if kind == "partiel" and acting and (role_of is None or role_of(key) not in PARTIAL_OK_ROLES):
@@ -5142,7 +5717,16 @@ def _find_by_label(label: str, action: str = "") -> tuple[int | None, str]:
         role_of=lambda idx: str(_element_info.get(idx, {}).get("type") or ""),
         roles=ACTION_ROLES.get(action, ()),
         acting=True,
+        combo_of=_combo_of_edit,
     )
+
+
+def _combo_of_edit(idx: int) -> int | None:
+    """Index du cache de la ComboBox dont l'Edit `idx` est l'enfant direct (même lecture de l'arbre), sinon None."""
+    parent = _element_info.get(idx, {}).get("combo_parent")
+    if parent is None:
+        return None
+    return next((i for i, info in _element_info.items() if info.get("tree_index") == parent), None)
 
 
 def _resolve_step_target(
@@ -5512,8 +6096,9 @@ def act(
       refusée (NeedsForegroundError, rien envoyé). foreground=True : vraie souris/clavier en REPLI seulement ; la garde
       du lot (jeton commun tenu sans trou, fenêtre devant, premier plan et curseur rendus à la fin) n'est prise qu'au
       premier geste physique réellement nécessaire.
-    - Compte rendu sans perte : une étape en échec arrête le lot, figure dans `steps` avec son erreur, `success` est
-      faux ; `success` vaut None si une étape est partie sans effet relisible. `next` dit quoi faire ensuite.
+    - Compte rendu sans perte : une étape en échec ou sans effet établi arrête le lot avant l'étape suivante et
+      figure dans `steps` ; `success` est faux en échec, None si l'effet reste inconnu. Aucun rejeu automatique.
+      Une postcondition relue vraie établit l'effet et permet de poursuivre. `next` dit quoi faire ensuite.
     """
     t0 = time.perf_counter()
     emergency_stop.check()
@@ -5568,6 +6153,8 @@ def act(
                     step_res["expect"] = {"met": met, "observed": observed}
                     step_res["verified"] = met
                     step_res["success"] = _success(met)
+                    if met is not True:
+                        step_res.pop("already", None)  # l'état du contrôle ne prouve pas la postcondition finale
             except Exception as error:  # noqa: BLE001 - le compte rendu des étapes déjà faites ne doit pas se perdre
                 failure = f"Étape {i} ({action or '?'}) : {error}"
                 interrupted = isinstance(error, UserInterruptError)
@@ -5584,12 +6171,12 @@ def act(
                 )
                 break
 
-            success = step_res.get("success") if isinstance(step_res, dict) else True
+            success = step_res.get("success") if isinstance(step_res, dict) else None
             verified = step_res.get("verified") if isinstance(step_res, dict) else None
             already = bool(isinstance(step_res, dict) and step_res.get("already"))
             if success is False:
                 status = "failed"
-            elif success is None or verified is None:
+            elif success is not True or verified is not True:
                 status = "unverified"
                 uncertain.append(i)
             else:
@@ -5612,6 +6199,8 @@ def act(
                     f" (attendu {expect}, observé {step_res.get('expect', {}).get('observed')})" if expect else ""
                 )
                 break
+            if status == "unverified":
+                break  # l'effet précédent doit être établi avant d'envoyer une autre action
     finally:
         _policy_local.current = previous_policy
         if policy.lot_guard is not None:
@@ -5645,7 +6234,10 @@ def act(
         res["note"] = note
     if uncertain and not failure:
         res["unverified_steps"] = uncertain
-        res["warning"] = "Étapes sans effet relu : regarder l'image jointe, ou ajouter une postcondition 'expect'."
+        res["warning"] = (
+            "Lot arrêté sur un effet non établi : la suite n'a pas été envoyée. "
+            "Regarder l'image jointe ou computer_look avant toute reprise ; ajouter une postcondition 'expect' si utile."
+        )
     res["next"] = agent_guard.next_for_act(res)
 
     # Post-execution inspection (lecture : permise même pendant un arrêt d'urgence)
