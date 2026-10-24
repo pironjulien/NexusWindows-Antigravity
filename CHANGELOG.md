@@ -9,6 +9,19 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.1.2] - 2026-10-24 — Text first
+
+### Changed
+- `look` without `capture_screenshot` returns the element list only; the image is attached when the tree is too thin
+  to act on (fewer than 6 elements: canvas, game, a page that publishes nothing), or with `capture_screenshot=true`,
+  `annotate` or `zoom`. `act` already attaches the image of an effect it could not read back. Measured on the common
+  Windows bench (eight runs, order swapped): same score with and without images (7/7), 59 % fewer observation tokens,
+  16 % faster.
+
+### Fixed
+- `capture_screenshot=false` with `output_path` writes the export without attaching it; the text names an attached
+  image only when one is attached.
+
 ## [3.1.1] - 2026-10-24 — Startup outside Windows
 
 ### Fixed

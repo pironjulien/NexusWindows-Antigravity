@@ -5859,9 +5859,11 @@ def format_look(state: dict[str, Any]) -> str:
             f"y image / {sy}) ; box_2d de la fenêtre entière, indépendant de l'image"
         )
     if not (state.get("elements") or []):
+        # « l'image jointe » seulement si elle l'est vraiment (décision `attached` du serveur MCP ; texte d'abord).
+        seen = "d'après l'image WebP jointe" if state.get("attached") else "capture_screenshot=true pour la voir"
         lines.append(
             "[Mode visuel / repli actif] Aucun élément UI Automation exposé par cette fenêtre. "
-            "Ciblez directement par box_2d [ymin, xmin, ymax, xmax] (d'après l'image WebP jointe) ou "
+            f"Ciblez directement par box_2d [ymin, xmin, ymax, xmax] ({seen}) ou "
             'coordonnées relatives target="@x,y" (avec foreground=true).'
         )
     for el in state.get("elements") or []:

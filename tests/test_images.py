@@ -119,3 +119,61 @@ def test_print_tells_red_from_green_of_the_same_grey():
 
 def test_action_image_limit_is_the_common_limit():
     assert mcp_server.ACTION_IMAGE_MAX == computer_client.IMAGE_MAX_SIDE
+
+
+def test_text_first_attaches_the_image_only_when_the_tree_is_thin(monkeypatch, tmp_path: Path):
+    """Texte d'abord (banc passe 2 du 24/10) : arbre riche → liste seule, sans capture ; demandée → jointe."""
+    mcp_server._SENT_IMAGES.clear()
+    shot = tmp_path / "shot.webp"
+    shot.write_bytes(b"RIFFwebp")
+    asked: list[bool] = []
+    rich = [{"id": i, "role": "button", "name": f"B{i}"} for i in range(8)]
+
+    def look(**kwargs):
+        asked.append(kwargs["capture_screenshot"])
+        state = {"hwnd": 4242, "title": "T", "elements": rich, "image_print": "a",
+                 "image_dimensions": (800, 600), "scale_factor": 1.0}  # fmt: skip
+        if kwargs["capture_screenshot"]:
+            state["screenshot_path"] = str(shot)
+        return state
+
+    monkeypatch.setattr(computer_client, "look", look)
+    assert isinstance(mcp_server.computer_look(hwnd=4242), str) and asked == [False]
+    assert isinstance(mcp_server.computer_look(hwnd=4242, capture_screenshot=True), list) and asked[-1] is True
+    rich.clear()  # canevas : l'arbre ne suffit plus, la capture suit
+    asked.clear()
+    mcp_server._SENT_IMAGES.clear()
+    assert isinstance(mcp_server.computer_look(hwnd=4242), list) and asked == [False, True]
+
+
+def test_explicit_false_never_attaches_even_when_exporting(monkeypatch, tmp_path: Path):
+    """capture_screenshot=False + output_path : export écrit sur disque, aucune image jointe (relecture de Codex)."""
+    mcp_server._SENT_IMAGES.clear()
+    shot = tmp_path / "export.webp"
+    shot.write_bytes(b"RIFFwebp")
+    asked: list[bool] = []
+
+    def look(**kwargs):
+        asked.append(kwargs["capture_screenshot"])
+        return {"hwnd": 4242, "title": "T", "elements": [], "screenshot_path": str(shot), "image_print": "a",
+                "image_dimensions": (800, 600), "scale_factor": 1.0}  # fmt: skip
+
+    monkeypatch.setattr(computer_client, "look", look)
+    out = mcp_server.computer_look(hwnd=4242, capture_screenshot=False, output_path=str(shot))
+    assert isinstance(out, str) and asked == [True]  # capturé pour le fichier, jamais joint
+    asked.clear()
+    assert isinstance(mcp_server.computer_look(hwnd=4242, capture_screenshot=False, annotate=True), str)
+    assert asked == [False]
+
+
+def test_empty_search_does_not_claim_an_attached_image():
+    text = computer_client.format_look({"hwnd": 1, "title": "T", "elements": []})
+    assert "image WebP jointe" not in text and "capture_screenshot=true" in text
+
+
+def test_attached_image_is_named_only_when_attached():
+    assert "image WebP jointe" in computer_client.format_look(
+        {"hwnd": 1, "title": "T", "elements": [], "attached": True}
+    )
+    exported = {"hwnd": 1, "title": "T", "elements": [], "screenshot_path": "export.webp"}  # écrit, pas joint
+    assert "image WebP jointe" not in computer_client.format_look(exported)

@@ -355,6 +355,9 @@ def computer_list_windows(visible_only: bool = True, by_app: bool = False) -> st
     return _format_computer_result(computer_client.list_windows, visible_only=visible_only)
 
 
+THIN_TREE = 6  # moins d'éléments que cela : l'arbre ne suffit pas, la capture accompagne la liste (comme Claude)
+
+
 @_register_common_tool("look", READ_ONLY)
 def computer_look(
     hwnd: int | str | None = None,
@@ -362,18 +365,26 @@ def computer_look(
     max_elements: int = 120,
     max_depth: int = 30,
     annotate: bool = False,
-    capture_screenshot: bool = True,
+    capture_screenshot: bool | None = None,
     output_path: str | None = None,
     format: str = "text",
     zoom: list[int] | None = None,
 ) -> Any:
     """GOLDEN RULE: look → act in one batch, targets by label; never resend a batch without looking.
     See a NAMED window (hwnd: number, title or process) WITHOUT bringing it to the front (covered ones too): one line
-    per element "[N] role "name" = "value" states @x,y" and an attached image (WebP). query filters; annotate=true
-    draws the numbers; format="json": compact JSON (box_2d 0-1000 per element). zoom=box_2d: that area enlarged
-    (small text). Image ≤ 1568 px; same screen as the last image sent: not attached again. Unlocks a batch already sent.
+    per element "[N] role "name" = "value" states @x,y"; image (WebP ≤ 1568 px) only if the tree is too thin, or with
+    capture_screenshot=true, annotate (numbers drawn) or zoom=box_2d (area enlarged); query filters; format="json":
+    compact JSON (box_2d 0-1000 per element). Same screen as the last image sent: not attached again. Unlocks a batch.
     Example: {"hwnd": "Notepad", "query": "save"}"""
     note = emergency_stop.hotkey_note()
+    # Texte d'abord (règle commune, point 2 ; banc passe 2 du 24/10, deux tours en ordre inversé : 7/7 avec et sans
+    # image, −59 % de jetons d'observation, durée −16 %) : capture_screenshot omis = l'arbre seul, puis la capture si
+    # l'arbre est trop pauvre pour agir (canevas, jeu, page qui ne publie rien).
+    # capture_screenshot=False explicite : jamais d'image jointe (un export output_path reste écrit sur disque, comme
+    # avant) ; la capture d'un fichier n'implique pas sa pièce jointe (relecture de Codex du 24/10).
+    auto = capture_screenshot is None
+    refused = capture_screenshot is False
+    capture = bool(capture_screenshot) or bool(output_path) or (not refused and (bool(annotate) or bool(zoom)))
     try:
         state = computer_client.look(
             hwnd=hwnd,
@@ -381,10 +392,22 @@ def computer_look(
             max_elements=max_elements,
             max_depth=max_depth,
             annotate=annotate,
-            capture_screenshot=capture_screenshot,
+            capture_screenshot=capture,
             output_path=output_path,
             zoom=zoom,
         )
+        if auto and not capture and not query and len(state.get("elements") or []) < THIN_TREE:
+            capture = True
+            state = computer_client.look(
+                hwnd=hwnd,
+                query=query,
+                max_elements=max_elements,
+                max_depth=max_depth,
+                annotate=annotate,
+                capture_screenshot=True,
+                output_path=output_path,
+                zoom=zoom,
+            )
     except Exception as error:  # noqa: BLE001 - toute erreur revient en clair, avec quoi essayer
         payload = _error_payload(error)
         if note:
@@ -393,7 +416,8 @@ def computer_look(
     _observed(state.get("hwnd") or hwnd)
     shot = state.get("screenshot_path")
     window = state.get("hwnd")
-    attach = bool(capture_screenshot and shot and Path(shot).is_file())
+    attach = bool(capture and not refused and shot and Path(shot).is_file())
+    state["attached"] = attach  # le texte ne parle d'« image jointe » que dans ce cas (relecture de Codex)
     if attach and window and not _fresh_image(window, state.get("zoom"), state.get("image_print"), force=annotate):
         attach = False
         state["image"] = UNCHANGED_NOTE  # dans le JSON comme dans le texte (relecture de Codex)

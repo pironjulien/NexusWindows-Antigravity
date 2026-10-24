@@ -96,7 +96,7 @@ Five listed MCP tools, named like the other NexusWindows tools (Claude, Codex); 
 | Tool | Purpose |
 | --- | --- |
 | `windows` | Application windows (`by_app=true`: grouped by application) |
-| `look` | One line per element `[N] role « name » = « value » states @x,y`, plus an image, without bringing the window forward |
+| `look` | One line per element `[N] role « name » = « value » states @x,y`, without bringing the window forward; the image only when the tree is too thin, or on request (text first: 59 % fewer tokens, same score) |
 | `act` | Several steps in one call (click, type, check, uncheck, select, menu, keys...), each read back: ✓ = ~ ✗ |
 | `launch` | Open an application, document, folder, script or shortcut; the opening is read back |
 | `window` | `action="close"`: close a window (UI Automation, then `WM_CLOSE`) |

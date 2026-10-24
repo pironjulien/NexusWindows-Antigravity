@@ -3,7 +3,7 @@ name: nexus-computer
 description: Piloter le bureau Windows et ses applications en arrière-plan (look puis act en un lot, cibles par libellé ; chaque réponse dit quoi faire ensuite).
 ---
 
-# NexusAGY Computer (v3.1.1)
+# NexusAGY Computer (v3.1.2)
 
 **RÈGLE D'OR : `look` → `act` en UN lot avec des cibles par libellé ; ne jamais renvoyer un lot sans avoir regardé.**
 
@@ -14,7 +14,7 @@ Agir directement, sans lire le code : jeton commun, arrêt d'urgence, pause de J
 | Situation | Outil |
 |---|---|
 | Trouver la fenêtre | `windows()` (`by_app=true` : par application) |
-| Voir une fenêtre, même recouverte | `look(hwnd="titre, processus ou numéro")` : une ligne par élément + image jointe |
+| Voir une fenêtre, même recouverte | `look(hwnd="titre, processus ou numéro")` : une ligne par élément ; image jointe si l'arbre est trop pauvre, ou avec `capture_screenshot=true` |
 | Remplir, cocher, choisir, cliquer, menu | `act(hwnd=..., steps=[...])`, `target="Libellé"` |
 | La cible n'a pas de libellé, seule l'image la montre | étape avec `box_2d` [ymin, xmin, ymax, xmax] (0-1000, d'après l'image), ou `x`/`y` (le `@x,y` du regard) |
 | Réponse `~` ou `✗` | regarder l'image jointe (ou `look`), corriger, renvoyer seulement la suite |
