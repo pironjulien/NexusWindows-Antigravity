@@ -1859,6 +1859,81 @@ def _title_names_file(title: Any, file_name: str) -> bool:
     return False
 
 
+# Application Chromium/Electron lancée recouverte (recette commune, benchmarks/windows/RECETTES.md, 24/10) : sans ces
+# commutateurs, Chromium ne dessine ni ne publie à l'accessibilité une fenêtre recouverte dès son démarrage (Logi
+# Options+ resté sur son écran de démarrage violet derrière Claude agrandi ; banc « lancement recouvert » : bouton
+# introuvable, 0/3). Chromium ne retient que le DERNIER --disable-features : un seul, fusionné.
+CHROMIUM_OCCLUSION_FEATURE = "CalculateNativeWinOcclusion"
+CHROMIUM_A11Y_SWITCH = "--force-renderer-accessibility"
+STARTF_USESHOWWINDOW, SW_SHOWNOACTIVATE = 0x1, 4
+OPEN_GIVE_BACK_S = 1.0  # l'application peut s'activer après l'apparition de sa fenêtre (affichage différé)
+
+
+def is_chromium_app(exe: str) -> bool:
+    """Chromium ou Electron, reconnu à ses ressources à côté de l'exécutable (jamais à son nom)."""
+    folder = Path(exe).parent
+    return Path(exe).suffix.lower() == ".exe" and (
+        (folder / "resources" / "app.asar").exists()
+        or (folder / "resources" / "app").is_dir()
+        or (folder / "chrome_100_percent.pak").exists()
+    )
+
+
+def _shortcut_target(path: str) -> tuple[str, str] | None:
+    """Cible et arguments d'un raccourci .lnk (WScript.Shell) ; None s'il est illisible."""
+    try:
+        import comtypes.client
+
+        link = comtypes.client.CreateObject("WScript.Shell", dynamic=True).CreateShortcut(path)
+        return str(link.TargetPath or ""), str(link.Arguments or "")
+    except Exception:  # noqa: BLE001 - raccourci illisible : ouvert tel quel par le shell
+        return None
+
+
+def chromium_launch_target(path: str) -> str:
+    """Exécutable Chromium/Electron à lancer soi-même avec les commutateurs : le programme, ou la cible d'un raccourci
+    SANS arguments propres (un profil, un port… ne sont jamais remplacés ni complétés). « » sinon."""
+    if Path(path).suffix.lower() == ".lnk":
+        found = _shortcut_target(path)
+        if not found or found[1].strip():
+            return ""
+        path = found[0]
+    return path if path and Path(path).is_file() and is_chromium_app(path) else ""
+
+
+def _start_chromium(exe: str) -> None:
+    """Démarre l'exécutable sans activation demandée, avec le suivi d'occlusion coupé et l'accessibilité forcée."""
+    import subprocess
+
+    info = subprocess.STARTUPINFO()
+    info.dwFlags |= STARTF_USESHOWWINDOW
+    info.wShowWindow = SW_SHOWNOACTIVATE
+    subprocess.Popen(  # noqa: S603 - chemin vérifié par _path_problem, aucun argument venu du modèle
+        [exe, f"--disable-features={CHROMIUM_OCCLUSION_FEATURE}", CHROMIUM_A11Y_SWITCH],
+        cwd=str(Path(exe).parent), startupinfo=info, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, close_fds=True,
+    )  # fmt: skip
+
+
+def _give_back_after_open(seen: dict[str, Any] | None, front_before: int) -> bool:
+    """Premier plan rendu à Julien si l'application ouverte le prend, y compris un peu APRÈS l'apparition de sa
+    fenêtre (Electron s'active à l'affichage). Le détenteur le rend lui-même (_hand_back, WM_SYSCOMMAND SC_HOTKEY) :
+    SetForegroundWindow seul est refusé à un processus d'arrière-plan (banc du 24/10 : 460 ms, jamais rendu)."""
+    if not seen or not front_before:
+        return _restore_if_stolen(front_before)
+    top = win32_controls.root_of(int(seen["hwnd"])) or int(seen["hwnd"])
+    stolen = False
+    deadline = time.monotonic() + OPEN_GIVE_BACK_S
+    while time.monotonic() < deadline:
+        fg = int(user32.GetForegroundWindow() or 0)
+        if fg and fg != front_before and win32_controls.root_of(fg) == top and not _other_agent_holds_token():
+            stolen = True
+            if not _hand_back(top, front_before):
+                restore_foreground(front_before)
+        time.sleep(0.02)
+    return _restore_if_stolen(front_before) or stolen
+
+
 def _is_protocol(path: str) -> bool:
     """Protocole d'activation Windows (ms-settings:, shell:, calculator:…), pas une lettre de lecteur ni une URL web."""
     return bool(re.match(r"^[a-z][a-z0-9+.-]+:(?![\\/])", path, re.IGNORECASE)) and "://" not in path
@@ -1926,10 +2001,20 @@ def open_path(path_or_url: str) -> dict[str, Any]:
     if problem:
         raise PermissionError(f"Ouverture refusée de « {path_or_url} » : {problem}. Rien n'a été ouvert.")
     target = Path(path_expanded)
-    app = target.name.lower() if target.suffix.lower() == ".exe" else _assoc_executable(path_expanded)
+    chromium = chromium_launch_target(path_expanded)
+    app = (
+        Path(chromium).name.lower()
+        if chromium
+        else target.name.lower()
+        if target.suffix.lower() == ".exe"
+        else _assoc_executable(path_expanded)
+    )
     before = {w["hwnd"] for w in list_windows(visible_only=True)}
     front_before = int(user32.GetForegroundWindow() or 0)
-    os.startfile(path_expanded)
+    if chromium:
+        _start_chromium(chromium)
+    else:
+        os.startfile(path_expanded)
     seen: dict[str, Any] | None = None
     verified_by = ""
     deadline = time.monotonic() + OPEN_WAIT_S
@@ -1947,10 +2032,12 @@ def open_path(path_or_url: str) -> dict[str, Any]:
                 if w["hwnd"] in before and of_app and _title_names_file(w.get("title"), target.name):
                     seen, verified_by = w, "fenêtre de l'application associée portant le nom (onglet)"
                     break
-    stolen = _restore_if_stolen(front_before)
+    stolen = _give_back_after_open(seen, front_before)
     result: dict[str, Any] = {"success": True if seen else None, "verified": bool(seen) or None, "path": path_expanded}
     if app:
         result["application"] = app
+    if chromium:
+        result["chromium"] = "dessinée et lisible même recouverte (suivi d'occlusion coupé, accessibilité forcée)"
     if seen:
         result.update(hwnd=seen["hwnd"], title=seen["title"], verified_by=verified_by)
     else:
@@ -2032,7 +2119,7 @@ def capture_window_image(
     hwnd: int | str | None = ...,
     full_screen: bool = ...,
     max_dimension: int = ...,
-    quality: int = ...,
+    zoom: list[int] | None = ...,
     return_meta: Literal[False] = ...,
     elements_to_annotate: list[dict[str, Any]] | None = ...,
 ) -> bytes: ...
@@ -2041,21 +2128,75 @@ def capture_window_image(
     hwnd: int | str | None = ...,
     full_screen: bool = ...,
     max_dimension: int = ...,
-    quality: int = ...,
+    zoom: list[int] | None = ...,
     *,
     return_meta: Literal[True],
     elements_to_annotate: list[dict[str, Any]] | None = ...,
 ) -> tuple[bytes, dict[str, Any]]: ...
+
+
+# Règle image commune des produits Nexus (shared/images.md, 24/10) : côté long ≤ 1568 px et ≤ 1,15 Mpx (Gemini 3,
+# Claude et GPT-5.x lisent cette taille sans la réduire), WebP sans perte jusqu'à 200 Ko, puis qualité 85, 70…
+# jusqu'à tenir 500 Ko : au-delà, Antigravity échoue en 400 (crash vu avant le 24/10).
+IMAGE_MAX_SIDE = 1568
+IMAGE_MAX_PIXELS = 1_150_000
+IMAGE_LOSSLESS_BUDGET = 200 * 1024
+IMAGE_LIMIT = 500 * 1024
+ZOOM_MAX_ENLARGE = 2.0  # zone zoomée agrandie au plus ×2 (lecture d'un petit texte), dans les mêmes plafonds
+
+
+def encode_webp(img: Image.Image) -> bytes:
+    """Image envoyée au modèle : WebP sans perte si ≤ 200 Ko, sinon qualité décroissante jusqu'à ≤ 500 Ko (à 0, un
+    écran entier de bruit pèse moins de 100 Ko). Mêmes dimensions : l'échelle annoncée reste juste."""
+    rgb = img.convert("RGB")
+
+    def encode(**options: Any) -> bytes:
+        buffer = io.BytesIO()
+        rgb.save(buffer, format="WEBP", method=4, **options)
+        return buffer.getvalue()
+
+    data = encode(lossless=True)
+    if len(data) <= IMAGE_LOSSLESS_BUDGET:
+        return data
+    for quality, budget in ((85, IMAGE_LOSSLESS_BUDGET), (70, IMAGE_LIMIT), (50, IMAGE_LIMIT), (30, IMAGE_LIMIT),
+                            (10, IMAGE_LIMIT), (0, IMAGE_LIMIT)):  # fmt: skip
+        data = encode(quality=quality)
+        if len(data) <= budget:
+            return data
+    return data
+
+
+def image_print(img: Image.Image) -> str:
+    """Empreinte EXACTE d'une image (dimensions et pixels RGB) : même écran que la dernière image envoyée = pas de
+    double. Pas l'empreinte grise 64×64 de shared/images.md : un voyant rouge devenu vert y garde le même gris
+    (relecture de Codex du 24/10) et disparaîtrait de la réponse."""
+    rgb = img.convert("RGB")
+    return hashlib.sha256(f"{rgb.width}x{rgb.height}:".encode() + rgb.tobytes()).hexdigest()
+
+
+def _fit(img: Image.Image, max_dimension: int, enlarge: float = 1.0) -> Image.Image:
+    """Taille envoyée : côté long ≤ max_dimension (1568 au plus) et ≤ 1,15 Mpx ; agrandie au plus de `enlarge`."""
+    width, height = img.size
+    side = min(max_dimension, IMAGE_MAX_SIDE)
+    scale = min(enlarge, side / max(width, height), (IMAGE_MAX_PIXELS / (width * height)) ** 0.5)
+    if abs(scale - 1.0) < 1e-6:
+        return img
+    size = (max(1, int(width * scale)), max(1, int(height * scale)))
+    return img.resize(size, Image.Resampling.LANCZOS)
+
+
 def capture_window_image(
     hwnd: int | str | None = None,
     full_screen: bool = False,
-    max_dimension: int = 1280,
-    quality: int = 85,
+    max_dimension: int = IMAGE_MAX_SIDE,
+    zoom: list[int] | None = None,
     return_meta: bool = False,
     elements_to_annotate: list[dict[str, Any]] | None = None,
 ) -> bytes | tuple[bytes, dict[str, Any]]:
-    """Captures the target window or full screen and compresses to WebP (< 200 KB).
+    """Captures the target window or full screen as WebP (common image rule: ≤ 1568 px, ≤ 1.15 Mpx, ≤ 500 KB).
 
+    zoom: box_2d [ymin, xmin, ymax, xmax] (0-1000) of the window, captured at full resolution and enlarged up to ×2
+    (no marks drawn: the window's box_2d stay those of the whole image).
     Supports multi-monitor desktop setups, negative coordinates, and visual Set-of-Marks overlay.
     """
     ensure_default_desktop()
@@ -2100,8 +2241,27 @@ def capture_window_image(
             shot = sct.grab(region)
             img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
 
-    # Resize to maintain aspect ratio under max_dimension
-    img.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
+    zoom_box: list[int] | None = None
+    # Zone de la FENÊTRE (pixels de fenêtre) que couvre l'image envoyée : origine et tailles réelles après arrondis,
+    # d'où deux échelles exactes (relecture de Codex du 24/10 : une seule échelle théorique ratait de 238 px).
+    raw_width, raw_height = img.size
+    covered = (0.0, 0.0, float(region["width"]), float(region["height"]))
+    if zoom is not None:
+        if len(zoom) != 4:
+            raise ValueError("zoom : box_2d [ymin, xmin, ymax, xmax] entre 0 et 1000.")
+        ymin, xmin, ymax, xmax = (max(0, min(1000, int(v))) for v in zoom)
+        if ymax <= ymin or xmax <= xmin:
+            raise ValueError("zoom : zone vide (ymax > ymin et xmax > xmin attendus, 0-1000).")
+        zoom_box = [ymin, xmin, ymax, xmax]
+        width, height = img.size
+        box = (xmin * width // 1000, ymin * height // 1000, -(-xmax * width // 1000), -(-ymax * height // 1000))
+        img = img.crop(box)
+        to_x, to_y = region["width"] / raw_width, region["height"] / raw_height
+        covered = (box[0] * to_x, box[1] * to_y, (box[2] - box[0]) * to_x, (box[3] - box[1]) * to_y)
+        img = _fit(img, max_dimension, enlarge=ZOOM_MAX_ENLARGE)
+        elements_to_annotate = None  # numéros de la fenêtre entière : faux sur une zone
+    else:
+        img = _fit(img, max_dimension)
 
     # Visual Set-of-Marks overlay annotations (Stanford SoM style)
     if elements_to_annotate:
@@ -2125,22 +2285,20 @@ def capture_window_image(
         except Exception:
             pass
 
-    buf = io.BytesIO()
-    img.save(buf, format="WEBP", quality=quality, method=4)
-    data = buf.getvalue()
-
-    # If data exceeds 180 KB, recompress with slightly lower quality
-    if len(data) > 180 * 1024:
-        buf = io.BytesIO()
-        img.save(buf, format="WEBP", quality=70, method=4)
-        data = buf.getvalue()
+    data = encode_webp(img)
 
     if return_meta:
         meta = {
             "original_bounds": region,
             "original_size": (region["width"], region["height"]),
             "captured_size": img.size,
-            "scale_factor": round(img.size[0] / max(1, region["width"]), 4),
+            "scale_factor": round(img.size[0] / max(1.0, covered[2]), 4),
+            # x fenêtre = image_origin[0] + x image / scale_x ; y fenêtre = image_origin[1] + y image / scale_y
+            "image_origin": (round(covered[0], 2), round(covered[1], 2)),
+            "scale_x": round(img.size[0] / max(1.0, covered[2]), 4),
+            "scale_y": round(img.size[1] / max(1.0, covered[3]), 4),
+            "zoom": zoom_box,
+            "image_print": image_print(img),
         }
         return data, meta
 
@@ -2603,6 +2761,7 @@ def get_window_state(
     include_data_url: bool = False,
     annotate_screenshot: bool = False,
     query: str | None = None,
+    zoom: list[int] | None = None,
 ) -> dict[str, Any]:
     """Extracts compact UI Automation interactive elements and optional WebP screenshot.
 
@@ -2668,9 +2827,16 @@ def get_window_state(
 
     if capture_screenshot or output_path:
         annotate_list = elements if annotate_screenshot else None
-        webp_bytes, meta = capture_window_image(target_hwnd, return_meta=True, elements_to_annotate=annotate_list)
+        webp_bytes, meta = capture_window_image(
+            target_hwnd, zoom=zoom, return_meta=True, elements_to_annotate=annotate_list
+        )
         result["image_dimensions"] = meta.get("captured_size")
         result["scale_factor"] = meta.get("scale_factor")
+        result["image_origin"] = meta.get("image_origin")
+        result["scale_x"], result["scale_y"] = meta.get("scale_x"), meta.get("scale_y")
+        result["image_print"] = meta.get("image_print")
+        if meta.get("zoom"):
+            result["zoom"] = meta["zoom"]
 
         if output_path:
             dest = Path(output_path).expanduser().resolve()
@@ -5645,6 +5811,7 @@ def look(
     annotate: bool = False,
     capture_screenshot: bool = True,
     output_path: str | None = None,
+    zoom: list[int] | None = None,
 ) -> dict[str, Any]:
     """Inspects target window or screen, returning interactive elements and optional WebP screenshot.
 
@@ -5660,6 +5827,7 @@ def look(
         max_depth=max_depth,
         annotate_screenshot=annotate,
         query=query,
+        zoom=zoom,
     )
 
 
@@ -5679,6 +5847,17 @@ def format_look(state: dict[str, Any]) -> str:
         f"{state.get('element_count', len(state.get('elements') or []))} éléments · UIA {uia.get('status', '?')}"
     )
     lines = [head, 'cible : target="libellé exact", "#N", ou x/y (@x,y ci-dessous) ; box_2d d\'après l\'image']
+    size = state.get("image_dimensions")
+    if size:  # échelle toujours dite : x/y sont des pixels de FENÊTRE, l'image peut être réduite (règle commune)
+        sx = state.get("scale_x") or state.get("scale_factor")
+        sy = state.get("scale_y") or sx
+        left, top = state.get("image_origin") or (0, 0)
+        zoom = state.get("zoom")
+        where = f"zone zoomée box_2d {zoom}" if zoom else "fenêtre entière"
+        lines.append(
+            f"image {size[0]}x{size[1]} : {where} (x fenêtre = {left:g} + x image / {sx}, y fenêtre = {top:g} + "
+            f"y image / {sy}) ; box_2d de la fenêtre entière, indépendant de l'image"
+        )
     if not (state.get("elements") or []):
         lines.append(
             "[Mode visuel / repli actif] Aucun élément UI Automation exposé par cette fenêtre. "

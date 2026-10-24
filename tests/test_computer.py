@@ -79,8 +79,8 @@ def test_capture_window_image_anti_crash_400():
     webp_bytes = computer_client.capture_window_image(hwnd=target)
     assert isinstance(webp_bytes, bytes)
     assert len(webp_bytes) > 0
-    # Must strictly satisfy Anti-Crash 400 (< 200 KB)
-    assert len(webp_bytes) < 200 * 1024
+    # Règle image commune : jamais plus de 500 Ko (seuil du crash 400 d'Antigravity)
+    assert len(webp_bytes) <= computer_client.IMAGE_LIMIT
 
 
 def test_press_key_validation():
@@ -413,7 +413,7 @@ def test_open_path_and_coords(tmp_path):
     with (
         patch("os.startfile", side_effect=lambda p: opened.append(shown)) as mock_start,
         patch.object(computer_client, "list_windows", side_effect=lambda visible_only=True: list(opened)),
-        patch.object(computer_client, "_restore_if_stolen", return_value=False),
+        patch.object(computer_client, "_give_back_after_open", return_value=False),
     ):
         res = computer_client.open_path(str(folder))
         assert res["success"] is True and res["verified"] is True and res["hwnd"] == 77

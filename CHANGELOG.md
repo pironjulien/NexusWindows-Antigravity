@@ -9,6 +9,30 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-10-24 — Common image rule, Chromium apps launched covered
+
+### Changed
+- Images follow the common Nexus image rule: up to 1568 px and 1.15 MP (was 1280 px), lossless WebP up to 200 KB,
+  then quality 85, 70… until it fits 500 KB (the Antigravity 400-error threshold). `look` states the image size and
+  its scale.
+
+### Added
+- `look(zoom=box_2d)`: that area of the window at full resolution, enlarged up to 2×, for small text.
+- No duplicate image: when the exact pixels are unchanged since the last image sent for that window or area, the reply
+  says so instead of attaching it again (inside the JSON for `format="json"` and for action replies);
+  `look(annotate=true)` always attaches it. `look` states the image's origin and its scale on each axis
+  (window x = origin + image x / scale).
+
+### Fixed
+- `launch` / `open_path` of a Chromium or Electron executable (recognised by its resources), or of a `.lnk` shortcut
+  without its own arguments to one: started without activation with the switches that keep it drawn while covered.
+  Before, opened by the shell and covered from the start, it did not publish its page.
+- The foreground is handed back by its owner and watched for 1 s more after the window appears.
+
+### Security
+- Reviewed by the Codex agent over three rounds (zoom scale per axis, JSON kept valid, exact print instead of a grey
+  thumbnail that confused red and green).
+
 ## [3.0.2] - 2026-10-24 — Tk in the background, scrolling without a wheel
 
 ### Added

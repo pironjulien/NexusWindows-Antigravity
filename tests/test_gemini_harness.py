@@ -110,9 +110,14 @@ def test_next_for_act_points_at_the_first_problem():
     assert agent_guard.next_for_act(error).startswith("étape 2 : ✗ échec : boom")
 
 
+def _fake_capture(hwnd, max_dimension=1568, return_meta=False):
+    """Capture factice (WebP), sans empreinte : jointe à chaque fois."""
+    return (b"RIFFwebp", {"image_print": None}) if return_meta else b"RIFFwebp"
+
+
 def test_mcp_action_reply_carries_next_and_image_when_effect_unseen(monkeypatch):
     monkeypatch.setattr(computer_client, "resolve_window", lambda hwnd=None: 4242)
-    monkeypatch.setattr(computer_client, "capture_window_image", lambda hwnd, max_dimension=1280: b"RIFFwebp")
+    monkeypatch.setattr(computer_client, "capture_window_image", _fake_capture)
     unseen = {"success": None, "steps": [{"step": 0, "status": "unverified", "mark": "~"}]}
     unseen["next"] = agent_guard.next_for_act(unseen)
     with patch.object(computer_client, "act", return_value=unseen):
@@ -135,7 +140,7 @@ def test_mcp_unit_action_gets_next_and_mark(monkeypatch):
         payload = json.loads(mcp_server.computer_press_key("tab", hwnd=4242))
     assert payload["next"].startswith("✓") and payload["data"]["mark"] == "✓"
     error = computer_client.NeedsForegroundError("x", what="touches « f5 » — impossible en arrière-plan (UWP)")
-    monkeypatch.setattr(computer_client, "capture_window_image", lambda hwnd, max_dimension=1280: b"RIFFwebp")
+    monkeypatch.setattr(computer_client, "capture_window_image", _fake_capture)
     with patch.object(computer_client, "press_key", side_effect=error):
         reply = mcp_server.computer_press_key("f5", hwnd=4242)
     payload = json.loads(reply[0])
@@ -475,7 +480,7 @@ def test_status_reflects_worst_step():
 
 def test_mcp_act_status_and_next_agree_with_the_failing_step(monkeypatch):
     monkeypatch.setattr(computer_client, "resolve_window", lambda hwnd=None: 4242)
-    monkeypatch.setattr(computer_client, "capture_window_image", lambda hwnd, max_dimension=1280: b"RIFFwebp")
+    monkeypatch.setattr(computer_client, "capture_window_image", _fake_capture)
     data = {"success": False, "error": "Étape 1 (click) : Élément cible 'Bravo' introuvable dans la fenêtre.",
             "steps": [{"step": 0, "status": "ok", "mark": "✓", "verified": True},
                       {"step": 1, "action": "click", "status": "error", "mark": "✗", "error_type": "ValueError",
@@ -495,7 +500,7 @@ def test_mcp_act_status_and_next_agree_with_the_failing_step(monkeypatch):
 
 def test_mcp_unit_action_status_follows_its_readback(monkeypatch):
     monkeypatch.setattr(computer_client, "resolve_window", lambda hwnd=None: 4242)
-    monkeypatch.setattr(computer_client, "capture_window_image", lambda hwnd, max_dimension=1280: b"RIFFwebp")
+    monkeypatch.setattr(computer_client, "capture_window_image", _fake_capture)
     with patch.object(computer_client, "click", return_value={"success": False, "verified": False}):
         payload = json.loads(mcp_server.computer_click(hwnd=4242, element_index=3)[0])
     assert payload["status"] == "failed" and payload["next"].startswith("✗")

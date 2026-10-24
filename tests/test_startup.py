@@ -63,7 +63,7 @@ def test_initialize_announces_the_family_name_and_english_descriptions(tmp_path)
     et instructions en anglais, comme les éditions Claude et Codex."""
     pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     version = re.search(r'(?m)^version = "([^"]+)"', pyproject).group(1)  # type: ignore[union-attr]
-    assert version.split(".")[:2] == ["3", "0"]  # version commune de la famille, 3.0.x
+    assert version.split(".")[:2] == ["3", "1"]  # version commune de la famille, 3.1.x (règle image commune)
     params = _server_params(tmp_path)
 
     async def session_check():

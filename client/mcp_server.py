@@ -169,7 +169,26 @@ def _register_legacy_computer_tool(annotations: ToolAnnotations) -> Callable[[An
 # Constat du 16/10 : Gemini choisit mal parmi beaucoup d'outils, lit peu les longues descriptions et préfère
 # réessayer que vérifier. Le serveur ne LISTE donc que cinq outils (look, act, fenêtres, ouvrir, fermer) ; les
 # anciens restent appelables par leur nom (alias, comptes rendus identiques), simplement non listés.
-ACTION_IMAGE_MAX = 1280  # capture jointe aux actions dont l'effet n'est pas relu (WebP, côté le plus long)
+ACTION_IMAGE_MAX = computer_client.IMAGE_MAX_SIDE  # capture jointe aux actions dont l'effet n'est pas relu (WebP)
+# (fenêtre, zone zoomée ou None) → empreinte de la dernière image envoyée : la même ne repart pas (règle commune)
+_SENT_IMAGES: dict[tuple[int, tuple[int, ...] | None], str] = {}
+UNCHANGED_NOTE = (
+    "image inchangée depuis la dernière envoyée pour cette fenêtre (mêmes pixels) : non jointe ; look(annotate=true) "
+    "la joint toujours"
+)
+
+
+def _fresh_image(window: int, zoom: list[int] | None, printed: str | None, force: bool = False) -> bool:
+    """Vrai si l'image est à joindre : écran changé depuis la dernière image envoyée pour (fenêtre, zone), ou image
+    demandée quand même (force : look avec annotate=true)."""
+    key = (int(window), tuple(zoom) if zoom else None)
+    if not force and printed and _SENT_IMAGES.get(key) == printed:
+        return False
+    if printed:
+        _SENT_IMAGES[key] = printed
+    return True
+
+
 NO_IMAGE_ERRORS = {
     "EmergencyStopError",
     "UserInterruptError",
@@ -179,12 +198,15 @@ NO_IMAGE_ERRORS = {
 }
 
 
-def _window_image(window: int) -> Image | None:
-    """Capture compacte de la fenêtre (WebP ≤ 1280 px, sans la mettre devant), pour que Gemini vérifie de visu."""
+def _window_image(window: int) -> Image | str | None:
+    """Capture compacte de la fenêtre (WebP ≤ 1568 px, sans la mettre devant), pour que Gemini vérifie de visu ;
+    même écran que la dernière image envoyée : la note « image inchangée » à la place."""
     try:
-        data = computer_client.capture_window_image(window, max_dimension=ACTION_IMAGE_MAX)
+        data, meta = computer_client.capture_window_image(window, max_dimension=ACTION_IMAGE_MAX, return_meta=True)
     except Exception:  # noqa: BLE001 - une capture impossible n'efface jamais le compte rendu
         return None
+    if not _fresh_image(window, None, meta.get("image_print")):
+        return UNCHANGED_NOTE
     return Image(data=data, format="webp")
 
 
@@ -282,12 +304,11 @@ def _computer_action_run(
     note = emergency_stop.hotkey_note()
     if note:
         out["warning"] = note
+    picture = _window_image(window) if image and window and _effect_unseen(out) else None
+    if isinstance(picture, str):  # image inchangée : dite DANS le JSON, qui reste lisible (relecture de Codex)
+        out["image"], picture = picture, None
     text = json.dumps(out, ensure_ascii=False, indent=2 if out["status"] in agent_guard.REPORT_STATUSES else None)
-    if image and window and _effect_unseen(out):
-        picture = _window_image(window)
-        if picture is not None:
-            return [text, picture]
-    return text
+    return [text, picture] if picture is not None else text
 
 
 def _journal(kind: str, window: int, out: dict[str, Any], t0: float) -> None:
@@ -342,11 +363,13 @@ def computer_look(
     capture_screenshot: bool = True,
     output_path: str | None = None,
     format: str = "text",
+    zoom: list[int] | None = None,
 ) -> Any:
     """GOLDEN RULE: look → act in one batch, targets by label; never resend a batch without looking.
     See a NAMED window (hwnd: number, title or process) WITHOUT bringing it to the front (covered ones too): one line
     per element "[N] role "name" = "value" states @x,y" and an attached image (WebP). query filters; annotate=true
-    draws the numbers; format="json": compact JSON (box_2d 0-1000 per element). Unlocks a batch already sent.
+    draws the numbers; format="json": compact JSON (box_2d 0-1000 per element). zoom=box_2d: that area enlarged
+    (small text). Image ≤ 1568 px; same screen as the last image sent: not attached again. Unlocks a batch already sent.
     Example: {"hwnd": "Notepad", "query": "save"}"""
     note = emergency_stop.hotkey_note()
     try:
@@ -358,6 +381,7 @@ def computer_look(
             annotate=annotate,
             capture_screenshot=capture_screenshot,
             output_path=output_path,
+            zoom=zoom,
         )
     except Exception as error:  # noqa: BLE001 - toute erreur revient en clair, avec quoi essayer
         payload = _error_payload(error)
@@ -365,6 +389,12 @@ def computer_look(
             payload["warning"] = note
         return json.dumps(payload, ensure_ascii=False)
     _observed(state.get("hwnd") or hwnd)
+    shot = state.get("screenshot_path")
+    window = state.get("hwnd")
+    attach = bool(capture_screenshot and shot and Path(shot).is_file())
+    if attach and window and not _fresh_image(window, state.get("zoom"), state.get("image_print"), force=annotate):
+        attach = False
+        state["image"] = UNCHANGED_NOTE  # dans le JSON comme dans le texte (relecture de Codex)
     if format == "json":
         payload = {"status": "success", "data": state}
         if note:
@@ -372,10 +402,9 @@ def computer_look(
         text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     else:
         text = computer_client.format_look(state) + (f"\n⚠ {note}" if note else "")
-    shot = state.get("screenshot_path")
-    if capture_screenshot and shot and Path(shot).is_file():
-        return [text, Image(path=shot)]
-    return text
+        if state.get("image"):
+            text += f"\n{state['image']}"
+    return [text, Image(path=str(shot))] if attach else text
 
 
 @_register_common_tool("act", ACT)
@@ -665,8 +694,8 @@ def computer_take_screenshot(
     output_path: str | None = None,
     annotate_screenshot: bool = False,
 ) -> str:
-    """Alias de l'image de look : capture WebP (< 200 Ko) de la fenêtre nommée ou de tout l'écran, écrite sur
-    disque."""
+    """Alias de l'image de look : capture WebP (≤ 1568 px, ≤ 500 Ko) de la fenêtre nommée ou de tout l'écran, écrite
+    sur disque."""
 
     def _action() -> dict[str, Any]:
         target_hwnd = None if full_screen else computer_client.resolve_window(hwnd)

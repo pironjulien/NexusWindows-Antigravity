@@ -1,5 +1,5 @@
 {
   "name": "nexus-computer",
-  "version": "3.0.2",
+  "version": "3.1.0",
   "description": "Computer Use Windows pour Google Antigravity : bureau piloté en arrière-plan (UI Automation, messages Win32), vraie souris/clavier en repli, autonomie maximale, garde-fous de fiabilité dans le code (fenêtre nommée, cibles sans ambiguïté, pas de faux succès) et confirmation seulement pour payer, envoyer, publier"
 }
