@@ -9,6 +9,12 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-10-24 — Startup outside Windows
+
+### Fixed
+- The server starts again outside Windows (directory checks run it on Linux): the action image limit no longer reads
+  the Windows-only module at import. 3.1.0 was tagged but never reached PyPI; 3.1.1 carries its changes.
+
 ## [3.1.0] - 2026-10-24 — Common image rule, Chromium apps launched covered
 
 ### Changed

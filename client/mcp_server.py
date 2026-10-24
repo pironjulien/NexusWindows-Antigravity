@@ -169,7 +169,9 @@ def _register_legacy_computer_tool(annotations: ToolAnnotations) -> Callable[[An
 # Constat du 16/10 : Gemini choisit mal parmi beaucoup d'outils, lit peu les longues descriptions et préfère
 # réessayer que vérifier. Le serveur ne LISTE donc que cinq outils (look, act, fenêtres, ouvrir, fermer) ; les
 # anciens restent appelables par leur nom (alias, comptes rendus identiques), simplement non listés.
-ACTION_IMAGE_MAX = computer_client.IMAGE_MAX_SIDE  # capture jointe aux actions dont l'effet n'est pas relu (WebP)
+# Capture jointe aux actions dont l'effet n'est pas relu (WebP) : la limite commune, computer_client.IMAGE_MAX_SIDE
+# (valeur écrite ici : hors Windows, computer_client est un bouchon et le serveur doit démarrer pour les annuaires).
+ACTION_IMAGE_MAX = 1568
 # (fenêtre, zone zoomée ou None) → empreinte de la dernière image envoyée : la même ne repart pas (règle commune)
 _SENT_IMAGES: dict[tuple[int, tuple[int, ...] | None], str] = {}
 UNCHANGED_NOTE = (

@@ -115,3 +115,7 @@ def test_print_tells_red_from_green_of_the_same_grey():
     green = Image.new("RGB", (800, 600), (0, 130, 0))
     assert red.convert("L").tobytes() == green.convert("L").tobytes()  # même gris : l'empreinte grise les confondait
     assert computer_client.image_print(red) != computer_client.image_print(green)
+
+
+def test_action_image_limit_is_the_common_limit():
+    assert mcp_server.ACTION_IMAGE_MAX == computer_client.IMAGE_MAX_SIDE
