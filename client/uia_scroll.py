@@ -188,3 +188,120 @@ def container_at(hwnd: int, x: int, y: int, vertical: bool, pid: int) -> Any:
             candidates.append(Candidate(index, node.parent, rect))
             patterns[index] = pattern
     return patterns[choose(candidates, parents, x, y).index]
+
+
+# --- Défilement par la ligne suivante (Chromium sans DevTools), recette de NexusClaude du 23/10 ------------------------
+# Une page Chromium recouverte jette la molette (RerouteMouseWheel : fenêtre d'un autre processus sous le point) et ses
+# zones qui défilent n'ont pas de ScrollPattern. Comme un lecteur d'écran : la ligne cachée à 3 lignes par cran de la
+# zone sous le point est amenée dans la vue (ScrollItem), preuve par l'écart ligne-zone relu (la page autour défile
+# aussi). Une ligne n'appartient à une zone que si chaque conteneur entre elles la contient (sinon elle défile dans ce
+# conteneur intérieur). Relu par Codex sur NexusClaude (feu vert c97a651).
+LINES_PER_NOTCH = 3
+
+
+def _valid_rect(raw: Any) -> tuple[int, int] | None:
+    """(gauche, haut) d'un rectangle relu (gauche, haut, largeur, hauteur) de dimensions non nulles, sinon None : une
+    géométrie disparue (0, 0, 0, 0) ne prouve aucun mouvement (relecture de Codex du 24/10)."""
+    if not raw or len(raw) != 4:
+        return None
+    left, top, width, height = (int(round(v)) for v in raw)
+    return (left, top) if width > 0 and height > 0 else None
+
+
+def _lines_of(tree: Any, area: int, children: dict[int, list[int]]) -> list[int]:
+    out: list[int] = []
+
+    def visit(index: int, boxes: list[tuple[int, int, int, int]]) -> None:
+        for child in children.get(index, []):
+            rect = tree.nodes[child].rect
+            if rect is None:
+                continue
+            if not children.get(child):
+                if all(rect[1] >= box[1] - 1 and rect[3] <= box[3] + 1 for box in boxes):
+                    out.append(child)
+            else:
+                visit(child, [*boxes, rect])
+
+    visit(area, [])
+    return out
+
+
+def item_at(hwnd: int, x: int, y: int, delta_y: int, check: Callable[[], None]) -> dict[str, Any]:
+    """Défilement vertical par la ligne cachée suivante de la zone sous le point écran (x, y) de `hwnd`."""
+    import comtypes
+
+    try:
+        from . import uia_fast  # type: ignore[attr-defined]
+    except ImportError:
+        import uia_fast
+    from comtypes.gen import UIAutomationClient as U
+
+    if not delta_y:
+        raise NotApplicable("défilement par ligne : vertical seulement, rien n'a été envoyé")
+    down = delta_y < 0
+    tree = uia_fast.reader().read_tree(hwnd, max_nodes=5000, time_budget=2.0)
+    if tree.status != "ok":
+        raise NotApplicable(f"arbre UI Automation incomplet ({tree.status}) : rien n'a été envoyé")
+    children: dict[int, list[int]] = {}
+    for index, node in enumerate(tree.nodes):
+        children.setdefault(node.parent, []).append(index)
+
+    def holds(index: int) -> bool:
+        r = tree.nodes[index].rect
+        return r is not None and r[0] <= x < r[2] and r[1] <= y < r[3]
+
+    path: list[int] = []
+    current = -1
+    while True:  # descente vers le point : l'enfant qui a lui-même des enfants d'abord (volet vide de Chromium)
+        covering = [c for c in children.get(current, []) if holds(c)]
+        if not covering:
+            break
+        current = next((c for c in covering if children.get(c)), covering[0])
+        path.append(current)
+    hidden: list[int] = []
+    area = -1
+    box_rect: tuple[int, int, int, int] | None = None
+    rects: dict[int, tuple[int, int, int, int]] = {}
+    for candidate in reversed(path):
+        rect = tree.nodes[candidate].rect
+        lines = _lines_of(tree, candidate, children)
+        rects = {i: r for i in lines if (r := tree.nodes[i].rect) is not None}
+        if rect is None or len(rects) < 2:
+            continue
+        if down:
+            hidden = sorted((i for i, r in rects.items() if r[3] > rect[3] + 1), key=lambda i: rects[i][1])
+        else:
+            hidden = sorted((i for i, r in rects.items() if r[1] < rect[1] - 1), key=lambda i: -rects[i][3])
+        if hidden:
+            area, box_rect = candidate, rect
+            break
+    if not hidden or box_rect is None:
+        raise NotApplicable("aucune zone sous le point n'a de ligne cachée dans ce sens : rien n'a été envoyé")
+    target = hidden[min(abs(delta_y) * LINES_PER_NOTCH, len(hidden)) - 1]
+    line, box = tree.nodes[target], tree.nodes[area]
+    before = rects[target][1] - box_rect[1]
+    try:
+        raw = line.element.GetCurrentPattern(U.UIA_ScrollItemPatternId)
+        pattern = raw.QueryInterface(U.IUIAutomationScrollItemPattern) if raw else None
+    except (comtypes.COMError, AttributeError, ValueError):
+        pattern = None
+    if pattern is None:
+        raise NotApplicable("ligne sans ScrollItem : rien n'a été envoyé")
+    check()  # arrêt d'urgence pendant la préparation : rien n'est invoqué
+    try:
+        pattern.ScrollIntoView()
+    except comtypes.COMError as error:
+        # Erreur APRÈS l'appel : il a pu agir ; issue inconnue, aucune autre technique par-dessus.
+        return {"verified": None, "message": f"ScrollIntoView envoyé puis erreur ({error}) : vérifier l'image"}
+    deadline = time.monotonic() + READ_BACK_S
+    while time.monotonic() < deadline:
+        time.sleep(0.05)
+        try:
+            now_line = _valid_rect(uia_fast.refresh(line.element).get("rect"))
+            now_box = _valid_rect(uia_fast.refresh(box.element).get("rect"))
+        except Exception:  # noqa: BLE001 - relecture impossible : on réessaie jusqu'à l'échéance
+            continue
+        if now_line and now_box and now_line[1] - now_box[1] != before:
+            moved = before - (now_line[1] - now_box[1])
+            return {"verified": True, "message": f"ligne « {line.name[:30]} » déplacée de {moved:+d} px dans sa zone"}
+    return {"verified": None, "message": "ligne amenée dans la vue, zone non vue défiler en 1 s : vérifier l'image"}

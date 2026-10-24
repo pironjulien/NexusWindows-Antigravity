@@ -3650,6 +3650,31 @@ def _physical_point_click(
                 result["verified_by"] = how
             _log("click", "win32_post_click", target_hwnd, t0, result, {"screen_coords": (sx, sy)})
             return result
+    if win32_controls.family(target_hwnd) == "Tk":
+        # Tk (canevas, boutons dessinés) : clic ENVOYÉ avec le bouton simulé pour son seul fil (recette de NexusClaude
+        # du 23/10). Envoyé, même en partie : jamais de vraie souris par-dessus.
+        before = window_fingerprint(target_hwnd, with_tree=True)
+        top = win32_controls.root_of(target_hwnd) or target_hwnd
+        sent, partial = True, False
+        try:
+            win32_controls.tk_click(top, sx, sy, button, click_count, check=emergency_stop.check)
+        except win32_controls.PartialSendError:
+            partial = True  # issue inconnue : jamais promue en succès par une empreinte changée
+        except win32_controls.MessageError:
+            sent = False
+        if sent:
+            verified, how = _wait_window_effect(
+                target_hwnd, before, structural_only=click_count > 1 or button != "left"
+            )
+            if partial:
+                verified, how = None, "envoi partiel : issue inconnue, vérifier l'image"
+            result = {"success": _success(verified), "method": "tk_held_click", "partial": partial,
+                      "technique": "clic envoyé, bouton simulé pour le fil de Tk", "physical": False, **origin,
+                      "verified": verified, "timing_ms": round((time.perf_counter() - t0) * 1000, 2)}  # fmt: skip
+            if how:
+                result["verified_by"] = how
+            _log("click", "tk_held_click", target_hwnd, t0, result, {"screen_coords": (sx, sy)})
+            return result
     _physical_gate(target_hwnd, foreground, "clic par coordonnées sur une zone sans élément UI Automation")
     before = window_fingerprint(target_hwnd, with_tree=True)
     _physical_click_at(target_hwnd, sx, sy, button, click_count, restore_focus, aim != "screen_coordinates")
@@ -4386,6 +4411,28 @@ def _background_keys(
         if how:
             chromium_keys["verified_by"] = how
         return chromium_keys
+    if fam == "Tk" and len(main) == 1 and field is None:
+        # Tk : touche ou raccourci par focus simulé (WM_SETFOCUS envoyé, jamais WM_ACTIVATE ; recette de NexusClaude du
+        # 23/10). Envoyé, même en partie : jamais le vrai clavier par-dessus.
+        mod_vks = [vk for vk, _ext in vk_entries[:-1]]
+        before = window_fingerprint(target_hwnd, with_tree=True)
+        top = win32_controls.root_of(target_hwnd) or target_hwnd
+        partial = False
+        try:
+            method = win32_controls.tk_keys(top, vk_entries[-1][0], mod_vks, check=emergency_stop.check)
+        except win32_controls.PartialSendError:
+            method, partial = "envoi partiel", True
+        except win32_controls.MessageError:
+            return None
+        verified, how = _wait_window_effect(target_hwnd, before)
+        if partial:  # issue inconnue : jamais promue en succès par une empreinte changée
+            verified, how = None, "envoi partiel : issue inconnue, vérifier l'image"
+        tk_result: dict[str, Any] = {"success": _success(verified), "verified": verified, "method": method,
+                                     "partial": partial,
+                                     "technique": "touches par focus simulé (Tk)", "keys": keys, "sent": True}  # fmt: skip
+        if how:
+            tk_result["verified_by"] = how
+        return tk_result
     if mods and len(main) == 1 and fam in win32_controls.MESSAGE_SHORTCUT_FAMILIES:
         # Raccourci Ctrl/Alt/Maj : état clavier du fil cible simulé (recette commune du banc NexusWindows).
         mod_vks = [vk for vk, _ext in vk_entries[:-1]]
@@ -4652,6 +4699,57 @@ def scroll(
                       "scroll_percent": {"before": outcome.get("before"), "after": outcome.get("after")}}  # fmt: skip
             if outcome.get("message"):
                 result["message"] = outcome["message"]
+            return result
+
+    # 1 ter. Sans molette (recette de NexusClaude du 23/10, relue par Codex) : Tk par sa barre de défilement native collée
+    # au widget sous le point ; Chromium sans DevTools par la ligne cachée suivante de la zone sous le point. Refus (rien
+    # envoyé) : on continue ; envoyé : jamais une autre technique ensuite.
+    if delta_y and not delta_x and x is not None and y is not None and family in ("Tk", "Chromium"):
+        if coords == "screen":
+            line_point = (int(x), int(y))
+        else:
+            rect = get_window_rect(target_hwnd)
+            line_point = (rect["left"] + int(x), rect["top"] + int(y))
+        top = win32_controls.root_of(target_hwnd) or target_hwnd
+        outcome = None
+        method = ""
+        if family == "Tk":
+            bar = win32_controls.scroll_bar_beside(top, line_point[0], line_point[1], True)
+            state = win32_controls.scroll_bar_state(bar) if bar else None
+            if state is not None:
+                low, high, page, pos = state
+                end = max(low, high - max(int(page), 1) + 1)
+                if not ((delta_y < 0 and pos >= end) or (delta_y > 0 and pos <= low)):
+                    emergency_stop.check()
+                    method = "tk_scroll_bar_lines"
+                    try:
+                        win32_controls.post_scroll_lines(
+                            bar, True, delta_y < 0, abs(delta_y) * uia_scroll.LINES_PER_NOTCH
+                        )
+                        outcome = {"verified": None, "message": "lignes envoyées, position non relue en 1 s"}
+                    except win32_controls.PartialSendError:
+                        outcome = {"verified": None, "message": "envoi partiel : issue inconnue", "partial": True}
+                    except win32_controls.MessageError:
+                        outcome = None
+                    if outcome is not None and not outcome.get("partial"):
+                        deadline = time.monotonic() + uia_scroll.READ_BACK_S
+                        while time.monotonic() < deadline:
+                            time.sleep(0.05)
+                            after = win32_controls.scroll_bar_state(bar)
+                            if after is not None and after[3] != pos:
+                                outcome = {"verified": True, "message": f"position {pos} → {after[3]}"}
+                                break
+        else:
+            method = "uia_scroll_item"
+            try:
+                outcome = uia_scroll.item_at(top, line_point[0], line_point[1], delta_y, emergency_stop.check)
+            except uia_scroll.NotApplicable:
+                outcome = None
+        if outcome is not None:
+            result = {"success": _success(outcome["verified"]), "method": method,
+                      "partial": bool(outcome.get("partial")),
+                      "technique": "défilement sans molette", "physical": False, "delta_y": delta_y,
+                      "verified": outcome["verified"], "message": outcome["message"]}  # fmt: skip
             return result
 
     # 2. Molette par message en Win32/WinForms (recette commune du banc NexusWindows : premier plan intact), au point
@@ -6202,8 +6300,9 @@ def act(
                 if expect and isinstance(step_res, dict):
                     met, observed = wait_expect(target_hwnd, expect)
                     step_res["expect"] = {"met": met, "observed": observed}
-                    step_res["verified"] = met
-                    step_res["success"] = _success(met)
+                    # Envoi partiel : issue inconnue terminale, qu'aucune postcondition n'efface (relecture de Codex).
+                    step_res["verified"] = None if step_res.get("partial") else met
+                    step_res["success"] = _success(step_res["verified"])
                     if met is not True:
                         step_res.pop("already", None)  # l'état du contrôle ne prouve pas la postcondition finale
             except Exception as error:  # noqa: BLE001 - le compte rendu des étapes déjà faites ne doit pas se perdre
@@ -6219,6 +6318,7 @@ def act(
                         "error": str(error),
                         "error_type": type(error).__name__,
                         **({"what": error.what} if isinstance(error, NeedsForegroundError) else {}),
+                        **({"partial_input": True} if getattr(error, "partial_input", False) else {}),
                     }
                 )
                 break

@@ -9,6 +9,18 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.0.2] - 2026-10-24 — Tk in the background, scrolling without a wheel
+
+### Added
+- Tk in the background, window covered: a click at a point is sent with the mouse button marked pressed for Tk's own
+  thread only (press and release owned by a helper thread, one simulated press at a time per application); keys and
+  shortcuts get a simulated focus (`WM_SETFOCUS` sent to that window only, never `WM_ACTIVATE`); lists scroll through
+  their native scroll bar attached to the targeted widget, read back with `GetScrollInfo`.
+- Scrolling a covered Chromium page without DevTools: the next hidden line of the area under the point is brought into
+  view (UI Automation ScrollItem), proven by the line's offset inside its area.
+- Measured on the three-tool bench (Cua Driver 0.38, Windows-MCP 0.8.8): Tk click, Ctrl+K and scrolling, Electron raw
+  click and scrolling now succeed in the background, foreground untouched.
+
 ## [3.0.1] - 2026-10-23 — Family harmonization
 
 ### Changed

@@ -20,7 +20,7 @@ Antigravity (Gemini) see and operate Windows desktop applications while the user
 foreground window. Built for a fast model: one look, then one batch of steps with label targets, and every reply
 says what to do next.
 
-Version 3.0.1 · Windows 10/11 · Python 3.11+ · MIT licence
+Version 3.0.2 · Windows 10/11 · Python 3.11+ · MIT licence
 
 Part of the Nexus family: [NexusWindows](https://julienpiron.fr/nexuswindows/)
 ([Claude](https://github.com/pironjulien/NexusWindows-Claude) ·
@@ -149,6 +149,23 @@ Tool descriptions, server instructions, tool and parameter names are in English;
   emergency stop (Ctrl+Alt+Shift+Esc, `%USERPROFILE%\.nexus\stop`), the same file protocols as
   [NexusWindows for Claude](https://github.com/pironjulien/NexusWindows-Claude#working-alongside-other-agents).
 
+## Side by side with Cua Driver and Windows-MCP (October 24, 2026)
+
+The three-tool bench of NexusWindows for Claude (`bench/cua_vs_nexus.py` with `NEXUS_BENCH_EDITION=antigravity`) drove
+this server, [Cua Driver](https://github.com/trycua/cua) 0.38.0 and [Windows-MCP](https://github.com/CursorTouch/Windows-MCP)
+0.8.8 through their real MCP servers on the same lab windows (Win32, WinForms, WPF, Tk, Electron, Edge), each covered
+by an opaque window, nobody at the PC. The effect is judged by the application, never by the tool's report. "Strict
+background" counts an effect only when the foreground stayed the user's, the cursor never moved and the tool reported
+no physical input. Raw results: [NexusWindows-Claude bench/results](https://github.com/pironjulien/NexusWindows-Claude/tree/main/bench/results).
+
+| 51 tasks | NexusWindows for Antigravity 3.0.2 | Cua Driver 0.38.0 |
+|---|---|---|
+| Effect proven in strict background | 43 | 22 |
+| False success (reported done, the app got nothing) | 0 | 4 |
+
+From 3.0.1 (38) to 3.0.2: Tk clicks, shortcuts and list scrolling, and scrolling covered Chromium lists. Windows-MCP
+has no background mode: it reached no effect without taking the screen.
+
 ## Architecture
 
 | Path | Role |
@@ -188,10 +205,15 @@ Questions or concerns: open an issue on this repository.
 ## Limits
 
 - Windows only. Tool descriptions are in English; tool replies and code comments are in French.
-- In the background, keyboard input is refused in UWP/WinUI, Firefox and Tk, and Ctrl/Alt shortcuts in WPF;
+- In the background, keyboard input is refused in UWP/WinUI and Firefox, and Ctrl/Alt shortcuts in WPF; Tk gets keys
+  and shortcuts through a simulated focus (`WM_SETFOCUS` to that window only), clicks sent with the mouse button marked
+  pressed for its thread, and lists scrolled through their native scroll bar;
   Chromium/Electron receives keys, shortcuts and typing through a simulated activation, checked by read-back (`~` if
   nothing changes). For web pages, [NexusBrowser](https://github.com/pironjulien/NexusBrowser) is more reliable.
 - An effect with nothing readable stays `~` (not verified).
+- Still refused in the background, with the cause read in each toolkit's source: WPF clicks at a point, wheel and
+  shortcuts (WPF drops a click while the real cursor is not over its window); a wheel on a covered Chromium or Tk
+  canvas (both route it to the window on top); a click at a point of a covered Electron page that has gone `hidden`.
 
 ## Development
 

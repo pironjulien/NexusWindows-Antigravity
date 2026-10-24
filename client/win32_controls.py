@@ -908,3 +908,284 @@ def post_chars(target: int, text: str) -> int:
         for i in range(0, len(data), 2):
             sender.post(target, WM_CHAR, int.from_bytes(data[i : i + 2], "little"), 1)
     return len(text)
+
+
+# --- Tk en arrière-plan (recette de NexusClaude du 23/10, relue par Codex en six tours, feu vert c97a651) ----------
+# Tk lit l'état des boutons et de Ctrl par GetKeyState au traitement (TkWinGetModifierState) : un clic posté sans
+# bouton « enfoncé » est ignoré. Pression ENVOYÉE avec le bouton simulé pour le seul fil de Tk, par un fil auxiliaire
+# qui possède pression ET relâchement (le délai de SendMessageTimeout n'est pas garanti sous AttachThreadInput) ; une
+# seule pression simulée à la fois par application ; relâchement sans réponse : application fermée aux pressions
+# simulées tant que sa fenêtre existe. Clavier : Tk ne route les touches qu'à sa fenêtre focalisée, qu'il tient de
+# WM_SETFOCUS (FocusIn) : WM_SETFOCUS envoyé (jamais WM_ACTIVATE), touches postées, WM_KILLFOCUS posté.
+import threading  # noqa: E402
+
+_GetAsyncKeyState = _fn("GetAsyncKeyState", ctypes.c_short, ctypes.c_int)
+BUTTON_VK = {"left": 0x01, "right": 0x02, "middle": 0x04}
+HELD_SEND_S = 1.0
+_PENDING_PRESS: set[int] = set()  # fils GUI dont une pression simulée n'est pas soldée
+_PENDING_LOCK = threading.Lock()
+WM_SETFOCUS, WM_KILLFOCUS = 0x0007, 0x0008
+
+
+def _thread_of(hwnd: int) -> int:
+    return int(_GetWindowThreadProcessId(hwnd, None) or 0)
+
+
+def _in_front(thread: int) -> bool:
+    fg = int(_GetForegroundWindow() or 0)
+    return bool(fg) and _thread_of(fg) == thread
+
+
+class _simulated_keys:
+    """Touches `vks` « enfoncées » pour le seul fil de `target` (file attachée, jamais celle du premier plan). En
+    sortie, seules ces touches reprennent leur valeur d'avant (leur état physique si l'utilisateur a pris la fenêtre) ;
+    lecture impossible : l'état d'avant entier."""
+
+    def __init__(self, target: int, vks: list[int]) -> None:
+        self.target, self.vks = target, vks
+        self.thread = _thread_of(target)
+        self.own = _GetCurrentThreadId()
+        self.saved = (ctypes.c_ubyte * 256)()
+        self.attached = False
+
+    def __enter__(self) -> _simulated_keys:
+        if not self.thread or _in_front(self.thread):
+            raise MessageError("Fil de la cible = fil du premier plan : état simulé refusé.")
+        if not _AttachThreadInput(self.own, self.thread, True):
+            raise MessageError("AttachThreadInput refusé.")
+        self.attached = True
+        _GetKeyboardState(ctypes.byref(self.saved))
+        state = (ctypes.c_ubyte * 256)(*self.saved)
+        for vk in self.vks:
+            state[vk] = 0x80
+        _SetKeyboardState(ctypes.byref(state))
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        if not self.attached:
+            return
+        try:
+            now = (ctypes.c_ubyte * 256)()
+            if not _GetKeyboardState(ctypes.byref(now)):
+                ctypes.memmove(now, self.saved, 256)
+            taken = _in_front(self.thread)
+            for vk in self.vks:
+                if taken:
+                    now[vk] = (0x80 if _GetAsyncKeyState(vk) & 0x8000 else 0) | (self.saved[vk] & 1)
+                else:
+                    now[vk] = self.saved[vk]
+            _SetKeyboardState(ctypes.byref(now))
+        finally:
+            _AttachThreadInput(self.own, self.thread, False)
+            self.attached = False
+
+
+def _held_press(target: int, vk: int, down: int, up: int, mk: int, lparam: int, check=None) -> None:
+    thread = _thread_of(target)
+    with _PENDING_LOCK:
+        if thread in _PENDING_PRESS:
+            raise MessageError("Pression simulée précédente non soldée dans cette application : rien n'a été envoyé.")
+        _PENDING_PRESS.add(thread)
+    abandoned, done = threading.Event(), threading.Event()
+    outcome: list[str] = []
+    raised: list[BaseException] = []
+    state = {"sent": False}
+
+    def run() -> None:
+        pressed = False
+        try:
+            if abandoned.is_set():
+                return
+            with _simulated_keys(target, [vk]):
+                if abandoned.is_set():
+                    return
+                if check is not None:
+                    check()  # arrêt d'urgence relu juste avant la pression (relecture de Codex du 24/10)
+                pressed = True
+                state["sent"] = True
+                if send(target, down, mk, lparam) is None:
+                    outcome.append("pression sans réponse en 1 s")
+        except MessageError as error:
+            outcome.append(str(error))
+        except BaseException as error:  # noqa: BLE001 - rendu tel quel au fil de travail (arrêt d'urgence compris)
+            raised.append(error)
+        finally:
+            try:
+                if pressed:  # relâchement de nettoyage, état déjà restauré : toujours envoyé
+                    if send(target, up, 0, lparam) is None:
+                        outcome.append("relâchement sans réponse en 1 s")
+                        done.set()
+                        while is_window(target):  # jamais prouvé soldé : fil fermé aux pressions simulées
+                            time.sleep(1.0)
+            finally:
+                with _PENDING_LOCK:
+                    _PENDING_PRESS.discard(thread)
+                done.set()
+
+    threading.Thread(target=run, name="agy-held-press", daemon=True).start()
+    deadline = time.monotonic() + HELD_SEND_S
+    try:
+        while not done.wait(0.02):
+            if check is not None:
+                check()  # arrêt d'urgence : abandon, l'auxiliaire qui n'a rien envoyé n'envoie plus rien
+            if time.monotonic() >= deadline:
+                raise PartialSendError("pression sans réponse en 1 s : issue inconnue")
+    except BaseException as error:
+        abandoned.set()
+        if state["sent"]:
+            error.partial_input = True  # type: ignore[attr-defined]  # pression déjà partie : issue inconnue
+        raise
+    if raised:
+        if state["sent"]:
+            raised[0].partial_input = True  # type: ignore[attr-defined]  # pression déjà partie : issue inconnue
+        raise raised[0]
+    if outcome:
+        if state["sent"]:
+            raise PartialSendError(outcome[0])
+        raise MessageError(outcome[0])
+
+
+def tk_click(top: int, x: int, y: int, button: str = "left", count: int = 1, check=None) -> int:
+    """Clic Tk à (x, y) écran, en arrière-plan : survol envoyé, puis pour chaque pression le bouton simulé pour le seul
+    fil de Tk. check() : arrêt d'urgence, avant chaque pression. Après le survol, toute erreur est PartialSendError
+    (issue inconnue, jamais de vraie souris par-dessus)."""
+    target = deepest_child_at(top, x, y)
+    if _in_front(_thread_of(target)):
+        raise MessageError("Fenêtre Tk au premier plan : rien de simulé.")
+    if _thread_of(target) in _PENDING_PRESS:
+        raise MessageError("Pression simulée précédente non soldée dans cette application : rien n'a été envoyé.")
+    down, up, mk, dbl = MOUSE_MESSAGES[button]
+    lp = _lparam_xy(*_message_point(target, x, y))
+    if not is_window(target) or send(target, WM_MOUSEMOVE, 0, lp) is None:
+        raise MessageError("survol sans réponse : rien d'autre n'a été envoyé")
+    try:
+        for i in range(count):
+            try:
+                if check is not None:
+                    check()
+                _held_press(target, BUTTON_VK[button], dbl if i == 1 else down, up, mk, lp, check)
+            except BaseException as error:
+                if i:  # une pression précédente est partie : issue inconnue, identité de l'erreur conservée
+                    error.partial_input = True  # type: ignore[attr-defined]
+                raise
+    except PartialSendError:
+        raise
+    except MessageError as error:
+        raise PartialSendError(f"clic Tk interrompu après le survol : {error}") from error
+    return target
+
+
+def tk_keys(top: int, vk: int, modifiers: list[int], check=None) -> str:
+    """Touche ou raccourci Ctrl/Maj vers une fenêtre Tk sans l'activer (focus simulé). Fenêtre au premier plan, ou
+    prise pendant la préparation : rien de simulé. Modificateurs simulés pour le seul fil de Tk, seules ces touches
+    restaurées en sortie (_simulated_keys). Envois comptés de bout en bout, WM_KILLFOCUS compris : après le premier
+    accepté, toute erreur est PartialSendError (issue inconnue, jamais le vrai clavier par-dessus). Alt refusé."""
+    if VK_MENU in modifiers:
+        raise MessageError("Raccourci avec Alt : pas de technique d'arrière-plan sûre, rien n'a été envoyé.")
+    thread = _thread_of(top)
+    if _in_front(thread):
+        raise MessageError("Fenêtre Tk au premier plan : rien de simulé.")
+    if send(top, WM_SETFOCUS, 0, 0) is None:
+        post(top, WM_KILLFOCUS, 0, 0)
+        raise MessageError("Tk ne répond pas à WM_SETFOCUS : aucune touche envoyée")
+    sender = _Sender()
+    try:
+        if check is not None:
+            check()
+        if _in_front(thread):
+            raise MessageError("Fenêtre Tk prise par l'utilisateur pendant la préparation : aucune touche envoyée")
+        with _simulated_keys(top, modifiers):
+            for m in modifiers:
+                sender.post(top, WM_KEYDOWN, m, _key_lparam(m, False))
+            sender.post(top, WM_KEYDOWN, vk, _key_lparam(vk, False))
+            sender.post(top, WM_KEYUP, vk, _key_lparam(vk, True))
+            for m in reversed(modifiers):
+                sender.post(top, WM_KEYUP, m, _key_lparam(m, True))
+            if modifiers:  # état tenu le temps du traitement (pas un accusé : l'effet reste relu)
+                started = time.monotonic()
+                _wait_input_idle(top, 2000)
+                remaining = SIM_MODIFIERS_HOLD_S - (time.monotonic() - started)
+                if remaining > 0:
+                    time.sleep(remaining)
+    except MessageError as error:
+        if sender.sent and not isinstance(error, PartialSendError):
+            raise PartialSendError(f"touches Tk interrompues après envoi : {error}") from error
+        raise
+    finally:
+        if not _in_front(thread):
+            try:
+                post(top, WM_KILLFOCUS, 0, 0)
+            except MessageError as error:
+                if sender.sent:
+                    raise PartialSendError(f"touches envoyées, focus simulé non défait : {error}") from error
+    return "tk_focus_keys"
+
+
+# --- Barre de défilement native (tk.Scrollbar), recette de NexusClaude du 23/10 ------------------------------------
+WM_HSCROLL, WM_VSCROLL = 0x0114, 0x0115
+SB_LINEUP, SB_LINEDOWN, SB_ENDSCROLL = 0, 1, 8
+SB_CTL, SIF_RANGE, SIF_PAGE, SIF_POS = 2, 0x1, 0x2, 0x4
+SBS_VERT = 0x1
+
+
+class _SCROLLINFO(ctypes.Structure):
+    _fields_ = [("cbSize", ctypes.c_uint), ("fMask", ctypes.c_uint), ("nMin", ctypes.c_int), ("nMax", ctypes.c_int),
+                ("nPage", ctypes.c_uint), ("nPos", ctypes.c_int), ("nTrackPos", ctypes.c_int)]  # fmt: skip
+
+
+_GetScrollInfo = _fn("GetScrollInfo", wintypes.BOOL, wintypes.HWND, ctypes.c_int, ctypes.c_void_p)
+_GetWindowRectRaw = _fn("GetWindowRect", wintypes.BOOL, wintypes.HWND, ctypes.c_void_p)
+
+
+def _rect(hwnd: int) -> tuple[int, int, int, int]:
+    r = wintypes.RECT()
+    _GetWindowRectRaw(hwnd, ctypes.byref(r))
+    return r.left, r.top, r.right, r.bottom
+
+
+def scroll_bar_state(bar: int) -> tuple[int, int, int, int] | None:
+    info = _SCROLLINFO(ctypes.sizeof(_SCROLLINFO), SIF_RANGE | SIF_PAGE | SIF_POS)
+    if not _GetScrollInfo(bar, SB_CTL, ctypes.byref(info)):
+        return None
+    return info.nMin, info.nMax, info.nPage, info.nPos
+
+
+def scroll_bar_beside(top: int, x: int, y: int, vertical: bool) -> int:
+    """Barre native visible du bon sens, sœur du widget sous le point, COLLÉE à lui sur toute sa hauteur (largeur),
+    et collée à aucun autre widget frère ; exactement une, sinon 0 (rien deviné)."""
+    under = deepest_child_at(top, x, y)
+    if not under or class_name(under).lower() == "scrollbar":
+        return 0
+    parent = int(_GetParent(under) or 0)
+    siblings = [h for h in child_windows(top) if int(_GetParent(h) or 0) == parent and _IsWindowVisible(h)]
+
+    def touches(bar: tuple[int, int, int, int], box: tuple[int, int, int, int], whole: bool) -> bool:
+        if vertical:
+            side = abs(bar[0] - box[2]) <= 4 or abs(box[0] - bar[2]) <= 4
+            span = (bar[1] <= box[1] + 4 and bar[3] >= box[3] - 4) if whole else (bar[1] < box[3] and box[1] < bar[3])
+        else:
+            side = abs(bar[1] - box[3]) <= 4 or abs(box[1] - bar[3]) <= 4
+            span = (bar[0] <= box[0] + 4 and bar[2] >= box[2] - 4) if whole else (bar[0] < box[2] and box[0] < bar[2])
+        return side and span
+
+    found = []
+    for bar in siblings:
+        if class_name(bar).lower() != "scrollbar" or bool(style(bar) & SBS_VERT) != vertical:
+            continue
+        r = _rect(bar)
+        if not touches(r, _rect(under), True):
+            continue
+        others = [h for h in siblings if h not in (bar, under) and class_name(h).lower() != "scrollbar"]
+        if any(touches(r, _rect(h), False) for h in others):
+            continue
+        found.append(bar)
+    return found[0] if len(found) == 1 else 0
+
+
+def post_scroll_lines(bar: int, vertical: bool, forward: bool, lines: int) -> None:
+    parent = int(_GetParent(bar) or 0)
+    msg = WM_VSCROLL if vertical else WM_HSCROLL
+    sender = _Sender()
+    for _ in range(lines):
+        sender.post(parent, msg, SB_LINEDOWN if forward else SB_LINEUP, bar)
+    sender.post(parent, msg, SB_ENDSCROLL, bar)
