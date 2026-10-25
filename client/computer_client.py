@@ -808,6 +808,8 @@ MODIFIER_NAMES = {"ctrl", "control", "alt", "shift", "win", "windows", "cmd"}
 SUBMIT_KEYS = {"enter", "return"}
 TRIGGER_ROLES = garde_fous.trigger_roles()
 NEIGHBOR_LEVELS = 3  # ancêtres du champ remontés pour trouver son bouton d'envoi (composeur, formulaire)
+NEIGHBOR_ROLES = ("Button", "SplitButton")  # ce qu'Entrée déclenche depuis un champ : un bouton, pas un lien
+COMMAND_WORDS = 5  # libellé d'un bouton d'envoi : une commande courte (« Envoyer », « Publier le post »)
 STATE_SYSTEM_DEFAULT = 0x100
 UIA_LEGACY_STATE = 30096  # UIA_LegacyIAccessibleStatePropertyId
 MAX_DEFAULT_PROBES = 60
@@ -846,6 +848,14 @@ def _live_trigger(node: Any) -> bool:
     return node.control_type in TRIGGER_ROLES and node.props.get("enabled") is not False
 
 
+def command_label(label: Any) -> bool:
+    """Libellé d'une commande, pas d'une question ni d'une phrase : un bouton d'aide voisin (« Pourquoi ne puis-je pas
+    envoyer cet élément ? », relevé par NexusWindows pour Claude le 25/10 sur le Chrome Web Store) n'est pas ce
+    qu'Entrée déclenche dans un champ."""
+    text = " ".join(str(label or "").split())
+    return bool(text) and "?" not in text and len(text.split()) <= COMMAND_WORDS
+
+
 def _neighbors(nodes: list[Any], index: int) -> list[Any]:
     """Éléments d'action du groupe du champ : sous-arbre de son ancêtre au plus NEIGHBOR_LEVELS au-dessus, jamais la
     racine (toute la fenêtre)."""
@@ -861,7 +871,7 @@ def _neighbors(nodes: list[Any], index: int) -> list[Any]:
         if nodes[i].parent not in inside:
             break
         inside.add(i)
-        if _live_trigger(nodes[i]):
+        if _live_trigger(nodes[i]) and nodes[i].control_type in NEIGHBOR_ROLES and command_label(nodes[i].name):
             out.append(nodes[i])
     return out
 
@@ -935,6 +945,7 @@ def require_key_confirmation(
     field: Any = None,
     accord: str = "",
     approved: set[str] | None = None,
+    gesture: str = "",
 ) -> None:
     """Refuse une touche qui déclencherait une action critique (bouton au focus, bouton par défaut,
     bouton d'envoi voisin du champ, raccourci Alt d'un bouton).
@@ -944,6 +955,7 @@ def require_key_confirmation(
     kind = _key_kind(keys)
     if not kind or not CONFIRM_PATTERNS or not confirmation_enabled():
         return
+    gesture = gesture or f"touche « {keys} »"
     for label, source in _key_triggers(target_hwnd, field, kind):
         outward = outward_word(label, target_hwnd)
         if outward:
@@ -953,7 +965,7 @@ def require_key_confirmation(
             context_str = f"{proc} — {title}" if proc and title else (proc or title)
             act_desc = garde_fous.action(
                 "windows",
-                f"touche « {keys} »",
+                gesture,
                 f"{str(label).strip()} ({source})",
                 content="\n".join(content_lines),
                 context=context_str,
@@ -968,14 +980,14 @@ def require_key_confirmation(
                     approved.add(fp)
                 continue
             raise ConfirmationRequiredError(
-                f"touche « {keys} » : déclencherait « {label.strip()[:60]} » ({source}), action sortante (« {outward} »).\n"
+                f"{gesture} : déclencherait « {label.strip()[:60]} » ({source}), action sortante (« {outward} »).\n"
                 f"Julien doit valider cette action exacte :\n{answer}"
             )
         if not confirm:
             word = confirm_word(label, target_hwnd)
             if word:
                 raise ConfirmationRequiredError(
-                    f"touche « {keys} » : déclencherait « {label.strip()[:60]} » ({source}), irréversible ou chez un "
+                    f"{gesture} : déclencherait « {label.strip()[:60]} » ({source}), irréversible ou chez un "
                     f"tiers (« {word} ») ; rien n'a été fait. Julien l'a demandé explicitement : renvoyer cette étape avec "
                     "confirm=true ; sinon (ton initiative), lui demander d'abord son oui."
                 )
@@ -1439,6 +1451,9 @@ def get_window_rect(hwnd: int) -> dict[str, int]:
 # -----------------------------------------------------------------------------
 # Window Management Functions
 # -----------------------------------------------------------------------------
+GW_OWNER = 4
+
+
 def list_windows(visible_only: bool = True) -> list[dict[str, Any]]:
     """Lists top-level windows on the interactive desktop.
 
@@ -1477,17 +1492,20 @@ def list_windows(visible_only: bool = True) -> list[dict[str, Any]]:
         if visible_only and proc_name.lower() in {"explorer.exe"} and not title:
             return True
 
-        windows.append(
-            {
-                "hwnd": hwnd,
-                "title": title,
-                "process_id": pid.value,
-                "process_name": proc_name,
-                "process_path": full_path,
-                "bounds": rect,
-                "is_foreground": (hwnd == fg_hwnd),
-            }
-        )
+        entry = {
+            "hwnd": hwnd,
+            "title": title,
+            "process_id": pid.value,
+            "process_name": proc_name,
+            "process_path": full_path,
+            "bounds": rect,
+            "is_foreground": (hwnd == fg_hwnd),
+        }
+        # Boîte possédée (« Ouvrir » de Chrome, #32770 sans WS_EX_APPWINDOW) : listée avec sa fenêtre propriétaire.
+        owner = int(user32.GetWindow(hwnd, GW_OWNER) or 0)
+        if owner:
+            entry["dialog_of"] = owner
+        windows.append(entry)
         return True
 
     proc = WNDENUMPROC(enum_cb)
@@ -1529,7 +1547,8 @@ WINDOW_UNNAMED = (
 
 
 def _window_line(w: dict[str, Any]) -> str:
-    return f"[{w['hwnd']}] « {str(w.get('title') or '')[:50]} » ({w.get('process_name') or '?'})"
+    owner = f" [boîte de {w['dialog_of']}]" if w.get("dialog_of") else ""
+    return f"[{w['hwnd']}] « {str(w.get('title') or '')[:50]} » ({w.get('process_name') or '?'}){owner}"
 
 
 def _pick_window(windows: list[dict[str, Any]], query: str, keys: tuple[str, ...]) -> int:
@@ -1546,6 +1565,13 @@ def _pick_window(windows: list[dict[str, Any]], query: str, keys: tuple[str, ...
 
     exact = [w for w in windows if q in values(w)]
     chosen = exact or [w for w in windows if any(q in v for v in values(w))]
+    if len(chosen) > 1 and "process_name" in keys:
+        # Nom de processus exact : la fenêtre principale passe avant les boîtes qu'elle possède (visées par leur titre).
+        process = str(chosen[0].get("process_name") or "").casefold()
+        same_process = all(str(w.get("process_name") or "").casefold() == process for w in chosen)
+        main = [w for w in chosen if not w.get("dialog_of")]
+        if same_process and q in (process, process.removesuffix(".exe")) and len(main) == 1:
+            return int(main[0]["hwnd"])
     if len(chosen) == 1:
         return int(chosen[0]["hwnd"])
     if chosen:
@@ -3227,6 +3253,37 @@ def _run_chain(
     return {"technique": None, "tried": tried}
 
 
+# Déclencheur d'un sélecteur de fichiers (bouton d'<input type=file>, zone de dépôt, « Parcourir ») : Chromium n'ouvre
+# ce sélecteur que sur une vraie activation de l'utilisateur ; UIA Invoke est accepté sans rien ouvrir, et le survol ou
+# le focus changent l'image et l'arbre (relevé par NexusWindows pour Claude le 25/10 dans Chrome : faux succès).
+FILE_PICKER = re.compile(
+    r"\b(choose (a |your )?files?|select (a |the |your )?files?|browse|upload|attach|add (a )?files?|drop|"
+    r"choisi(r|ssez) (un |des |les |votre |vos )?fichiers?|selectionne(r|z) (un |des |les |votre |vos )?fichiers?|"
+    r"parcouri?r|parcourez|televers(er|ez)|import(er|ez)|joindre|ajoute(r|z) (un |des |votre |vos )?fichiers?|"
+    r"depos(er|ez)|gliss(er|ez))\b"
+)
+PICKER_ROLES = {"Button", "Hyperlink", "Group", "Custom", "Text", "Image", "Pane", "SplitButton"}
+FILE_DIALOG_S = 2.0  # le sélecteur de Windows s'ouvre en ~0,3 s (mesuré par Claude) ; au-delà, il ne viendra plus
+
+
+def opens_file_picker(role: str, name: str) -> bool:
+    """L'élément ouvre-t-il un sélecteur de fichiers (d'après son libellé, anglais ou français) ?"""
+    return role in PICKER_ROLES and bool(FILE_PICKER.search(" ".join(_plain(name).split())))
+
+
+def owned_dialogs(hwnd: int) -> set[int]:
+    """Fenêtres visibles que possède la fenêtre `hwnd` (boîtes de dialogue, sélecteur de fichiers)."""
+    found: set[int] = set()
+
+    def enum_cb(child: int, _: int) -> bool:
+        if user32.GetWindow(child, GW_OWNER) == hwnd and user32.IsWindowVisible(child) and not is_window_cloaked(child):
+            found.add(int(child))
+        return True
+
+    user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
+    return found
+
+
 def _click_plan(
     ctrl: Any, info: dict[str, Any], target_hwnd: int
 ) -> tuple[str, list[tuple[str, Callable[[], Any]]], Callable[[Any], tuple[bool | None, str]]]:
@@ -3319,8 +3376,21 @@ def _click_plan(
     stateful_expand = role == "ComboBox" and expand_before is not None
     stateful = stateful_toggle or stateful_select or stateful_expand or bool(item_combo or toggle_combo)
     fingerprint = None if stateful else window_fingerprint(target_hwnd, with_tree=True)
+    picker = fam == "Chromium" and opens_file_picker(role, name)
+    dialogs_before = owned_dialogs(target_hwnd) if picker else set()
 
     def verify(_detail: Any) -> tuple[bool | None, str]:
+        if picker:
+            # Seule une boîte de dialogue ouverte par la fenêtre prouve le clic ; sans elle, rien ne s'est ouvert
+            # (relu absent) : la suite de la chaîne, puis la vraie souris (foreground=true).
+            deadline = time.monotonic() + FILE_DIALOG_S
+            while True:
+                fresh = owned_dialogs(target_hwnd) - dialogs_before
+                if fresh:
+                    return True, f"boîte de fichiers « {_window_text(min(fresh))[:40]} » ouverte"
+                if time.monotonic() >= deadline:
+                    return False, "aucune boîte de fichiers ouverte (Chromium exige une vraie activation)"
+                time.sleep(EFFECT_POLL_S)
         if item_combo and _detail == "cb_setcursel":
             label = win32_controls.combo_selected(item_combo)
             dropped = win32_controls.combo_dropped(item_combo)
@@ -4320,9 +4390,13 @@ def type_text(
     if method not in ("paste", "typing"):
         method = "paste" if ("\n" in text or len(text) > PASTE_MIN_CHARS) else "typing"
     if method == "typing" and "\n" in text and not submit:  # chaque retour à la ligne tapé est une vraie Entrée
+        # Le résumé (refus, accord) nomme le champ où part le saut de ligne, pas seulement ce qu'il déclencherait.
+        field_name = str(info.get("name") or "").strip()[:40] if ctrl is not None else ""
         require_key_confirmation(
-            target_hwnd, "enter", confirm, (ctrl, info) if ctrl is not None else None, accord=accord, approved=approved
-        )
+            target_hwnd, "enter", confirm, (ctrl, info) if ctrl is not None else None, accord=accord,
+            approved=approved,
+            gesture=f"saut de ligne tapé dans « {field_name} »" if field_name else "saut de ligne tapé dans le champ",
+        )  # fmt: skip
     if point is None and ctrl is not None:
         crect = ctrl.BoundingRectangle
         point = ((crect.left + crect.right) // 2, (crect.top + crect.bottom) // 2)

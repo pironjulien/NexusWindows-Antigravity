@@ -9,6 +9,23 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.1.5] - 2026-10-25
+
+Three fixes from real use in Chrome (reported by NexusWindows for Claude).
+
+### Fixed
+- Clicking a file-picker trigger in Chromium ("Choose file", "Browse", "Upload", a drop zone; English and French
+  labels): Chromium opens its file dialog only on a real user activation, and a UI Automation click changed the
+  image and the tree without opening anything. Such a click now succeeds only when a dialog owned by the window
+  opens (read back); otherwise it is reported as without effect and the real mouse is proposed (`foreground=true`).
+- Enter guard: a line break typed in a field was taken as Enter on a nearby help button ("Why can't I submit this
+  item?"). A button next to the field now counts only if it is a button (not a link) with a command label (five
+  words at most, no question mark); a messaging composer's Send button stays protected. The refusal and the
+  approval summary name the field the line break is typed in.
+- Owned dialogs (Chrome's "Open" box, without a taskbar button) are marked "[dialog of <hwnd>]" in error lists;
+  a process name now targets the application's main window when its other match is a dialog it owns (the dialog
+  stays reachable by its title).
+
 ## [3.1.4] - 2026-10-25
 
 One command to install.
@@ -336,7 +353,8 @@ Also released with 2.7.0, the first release after 2.5.0 (changes of 2026-10-14 t
   ([chrome-computer-use](https://github.com/pironjulien/chrome-computer-use)).
 - The floating companion window and the former multi-adapter layout of 2.5.0.
 
-[Unreleased]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.4...HEAD
+[Unreleased]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.5...HEAD
+[3.1.5]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.4...v3.1.5
 [3.1.4]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.3...v3.1.4
 [3.1.3]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.2...v3.1.3
 [3.1.2]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.1...v3.1.2
