@@ -257,7 +257,7 @@ def main() -> int:
     args = parser.parse_args()
 
     client_dir = Path(args.client_dir).resolve()
-    sys.path.insert(0, str(REPO_ROOT.parent / "shared"))  # jeton commun, même pour un client copié ailleurs
+    sys.path.insert(0, str(REPO_ROOT.parent / "commun"))  # jeton commun, même pour un client copié ailleurs
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     sys.path.insert(0, str(client_dir))
     import computer_client as cc

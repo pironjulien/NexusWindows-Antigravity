@@ -3,7 +3,7 @@
 Avant : un GetChildren() puis un GetValuePattern() (et une lecture de propriété par attribut) par nœud, soit des
 centaines d'allers-retours vers l'application cible. Ici : une IUIAutomationCacheRequest (propriétés utiles et
 disponibilité des motifs, TreeScope_Subtree, vue « contrôle ») et un seul ElementFromHandleBuildCache ; tout le reste
-(enfants, propriétés) se lit dans le cache local, sans IPC (inspiré de NexusClaude/nexus-windows uia.py).
+(enfants, propriétés) se lit dans le cache local, sans IPC (inspiré de NexusWindows/claude uia.py).
 
 Réglages :
 - AutoSetFocus = False (IUIAutomation2) : par défaut UIA donne le focus à l'élément avant chaque motif (Invoke,

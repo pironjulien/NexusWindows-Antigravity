@@ -111,7 +111,7 @@ def test_mcp_server_computer_tools():
         shot_raw = mcp_server.computer_take_screenshot(hwnd=target)
         shot_res = json.loads(shot_raw)
         assert shot_res["status"] == "success"
-        assert shot_res["data"]["size_bytes"] < 200 * 1024
+        assert shot_res["data"]["size_bytes"] <= computer_client.IMAGE_LIMIT  # règle image commune : 500 Ko
 
 
 def test_mcp_modular_scopes():
@@ -529,7 +529,7 @@ def test_shared_foreground_lock():
     import sys
     from pathlib import Path
 
-    shared_dir = Path(computer_client.__file__).resolve().parent.parent.parent / "shared"
+    shared_dir = Path(computer_client.__file__).resolve().parent.parent.parent / "commun"
     if str(shared_dir) not in sys.path:
         sys.path.insert(0, str(shared_dir))
     import foreground_lock
@@ -552,7 +552,7 @@ def test_focus_guard_aborts_when_lock_held():
     import sys
     from pathlib import Path
 
-    shared_dir = Path(computer_client.__file__).resolve().parent.parent.parent / "shared"
+    shared_dir = Path(computer_client.__file__).resolve().parent.parent.parent / "commun"
     if str(shared_dir) not in sys.path:
         sys.path.insert(0, str(shared_dir))
     import foreground_lock
@@ -578,7 +578,7 @@ def test_focus_guard_aborts_when_user_typing():
 
 def test_focus_guard_refuses_when_lock_unavailable():
     """Jeton inaccessible : refus clair, jamais d'action physique sans lui (protocole foreground-token.md)."""
-    shared_dir = Path(computer_client.__file__).resolve().parent.parent.parent / "shared"
+    shared_dir = Path(computer_client.__file__).resolve().parent.parent.parent / "commun"
     if str(shared_dir) not in sys.path:
         sys.path.insert(0, str(shared_dir))
     import foreground_lock
@@ -593,7 +593,7 @@ def test_focus_guard_refuses_when_lock_unavailable():
 
 def test_focus_guard_writes_purpose_in_token(tmp_path):
     """Le détenteur dit pourquoi il tient le jeton : les autres agents peuvent nommer l'action qu'ils attendent."""
-    shared_dir = Path(computer_client.__file__).resolve().parent.parent.parent / "shared"
+    shared_dir = Path(computer_client.__file__).resolve().parent.parent.parent / "commun"
     if str(shared_dir) not in sys.path:
         sys.path.insert(0, str(shared_dir))
     import foreground_lock
@@ -612,7 +612,7 @@ def test_focus_guard_writes_purpose_in_token(tmp_path):
 
 
 def _shared_lock_module():
-    shared_dir = Path(computer_client.__file__).resolve().parent.parent.parent / "shared"
+    shared_dir = Path(computer_client.__file__).resolve().parent.parent.parent / "commun"
     if str(shared_dir) not in sys.path:
         sys.path.insert(0, str(shared_dir))
     import foreground_lock

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NexusAGY - serveur MCP « nexus-windows-antigravity » : le bureau Windows de Julien (Computer Use), conçu pour Gemini.
+NexusWindows pour Antigravity - serveur MCP « nexus-windows-antigravity » : le bureau Windows de Julien (Computer Use), conçu pour Gemini.
 Le pont Chrome est NexusBrowser (serveur « nexus-browser », commun aux trois agents).
 """
 
@@ -126,16 +126,6 @@ TITLES = {
 
 def _titled(func: Any, annotations: ToolAnnotations) -> ToolAnnotations:
     return annotations.model_copy(update={"title": TITLES[func.__name__]})
-
-
-def _register_computer_tool(annotations: ToolAnnotations) -> Callable[[Any], Any]:
-    """Outil principal du bureau, listé à Gemini."""
-
-    def register(func: Any) -> Any:
-        computer_mcp.add_tool(func, annotations=_titled(func, annotations), structured_output=False)
-        return func
-
-    return register
 
 
 def _register_common_tool(name: str, annotations: ToolAnnotations) -> Callable[[Any], Any]:
@@ -314,7 +304,7 @@ def _computer_action_run(
 
 
 def _journal(kind: str, window: int, out: dict[str, Any], t0: float) -> None:
-    """Journal commun des trois Nexus Windows (shared/journal/FORMAT.md) : chaque appel d'action, sans texte d'écran,
+    """Journal commun des trois Nexus Windows (NexusShared/journal/FORMAT.md) : chaque appel d'action, sans texte d'écran,
     jamais bloquant."""
     try:
         app = computer_client.get_process_image_path(computer_client.app_pid(window))[1] if window else None

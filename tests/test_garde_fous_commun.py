@@ -1,5 +1,5 @@
 """Accord Claude–Antigravity « garde-fous » du 18/10/2026 : le Computer Use lit la politique COMMUNE
-(NexusHarness/shared/garde-fous.json) au lieu de ses listes en dur, sans changer son comportement de 2.8.1."""
+(NexusHarness/NexusWindows/commun/garde-fous.json) au lieu de ses listes en dur, sans changer son comportement de 2.8.1."""
 
 import sys
 from pathlib import Path
@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "client"))
 
 import computer_client  # noqa: E402
-import garde_fous  # noqa: E402  (chargé par computer_client depuis shared/)
+import garde_fous  # noqa: E402  (chargé par computer_client depuis NexusWindows/commun/)
 
 # Comportement de 2.8.1, figé : bureau sécurisé et gestionnaires de mots de passe ; ni la fenêtre d'identifiants
 # Windows ni la propre fenêtre d'Antigravity ne sont bloquées (catégories « antigravity » de garde-fous.json).
@@ -16,7 +16,7 @@ PASSWORD_MANAGERS_2_8_1 = ("keepass", "bitwarden", "1password", "dashlane", "nor
 
 
 def test_policy_is_the_shared_file():
-    assert computer_client.SHARED_DIR.name == "shared"
+    assert computer_client.SHARED_DIR.name == "commun"
     assert Path(garde_fous.__file__).resolve().parent == computer_client.SHARED_DIR
     assert garde_fous.POLICY_FILE.name == "garde-fous.json"
 

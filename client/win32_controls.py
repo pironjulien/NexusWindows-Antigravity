@@ -1,6 +1,6 @@
 """Contrôles Win32 natifs pilotés par messages directs : en arrière-plan, sans souris, sans clavier, sans focus.
 
-Mesures de référence (NexusClaude/nexus-windows bench/RESULTS.md, 11 octobre 2026) reprises ici :
+Mesures de référence (NexusWindows/claude bench/RESULTS.md, 11 octobre 2026) reprises ici :
 - Bouton Win32 : WM_COMMAND/BN_CLICKED au parent ✓ silencieux ; BM_CLICK active la fenêtre (il simule un clic) ;
   UIA Invoke ⚠ (le proxy UIA des boutons Win32 appelle lui-même SetForegroundWindow) : jamais sur un bouton Win32.
 - Case : BM_SETCHECK + BN_CLICKED ✓ (Win32) ; en WinForms, BN_CLICKED est sans effet → UIA Toggle.
@@ -134,7 +134,6 @@ BUTTON_CLASSES = ("button",)
 EDIT_CLASSES = ("edit", "richedit", "richedit20w", "richedit50w", "richeditd2dpt")
 COMBO_CLASSES = ("combobox",)
 LISTBOX_CLASSES = ("listbox",)
-COMBO_LIST_CLASSES = ("combolbox",)  # liste ouverte d'une liste déroulante : fenêtre de premier niveau à part
 
 # Famille d'interface d'une fenêtre de premier niveau, par préfixe de classe (NexusClaude snapshot.py).
 FAMILY_BY_CLASS = (
@@ -151,7 +150,6 @@ FAMILY_BY_CLASS = (
     ("SunAwt", "Java"),
     ("Notepad", "WinUI"),
 )
-UIA_ONLY_FAMILIES = {"WPF", "XAML", "UWP", "WinUI", "DirectUI", "Chromium", "Firefox"}
 NATIVE_FAMILIES = {"Win32", "WinForms"}
 
 
@@ -647,7 +645,7 @@ def is_window(hwnd: int) -> bool:
 
 
 # --- Souris et raccourcis par messages (recette commune, banc NexusWindows du 21/10/2026) ------------------------
-# Mesuré par le banc commun (shared/benchmarks/windows) et NexusClaude (bench/RESULTS.md) : clic et molette postés à
+# Mesuré par le banc commun (NexusWindows/commun/benchmarks/windows) et NexusClaude (bench/RESULTS.md) : clic et molette postés à
 # l'enfant le plus profond sous le point ✓ en Win32 et WinForms (effet émis par l'application, premier plan intact) ;
 # WPF ignore la souris postée ; raccourcis Ctrl/Alt postés ✓ en Win32 et WinForms si l'état clavier du fil cible est
 # simulé le temps du traitement (AttachThreadInput au seul fil de la cible, jamais à celui de Julien).

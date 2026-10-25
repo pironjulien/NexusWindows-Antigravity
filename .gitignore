@@ -18,3 +18,6 @@ Desktop.ini
 # Development caches (normally stored outside OneDrive by test.ps1)
 .pytest_cache/
 .ruff_cache/
+
+# Log written to the current folder by the uiautomation library (common bench)
+@AutomationLog.txt

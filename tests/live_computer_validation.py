@@ -781,7 +781,8 @@ def main_validation() -> int:
                 report,
                 winforms,
                 "WinForms",
-                {"button": "uia_invoke", "check": "uia_toggle", "edit": "uia_set_value"},
+                # bouton poussoir WinForms : BN_CLICKED posté d'abord (UIA Invoke bloquerait sur une boîte modale)
+                {"button": "win32_bn_clicked", "check": "uia_toggle", "edit": "uia_set_value"},
             )
 
         for make, family in ((df.winforms_form, "WinForms"), (df.wpf_form, "WPF")):

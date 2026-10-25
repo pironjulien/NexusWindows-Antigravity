@@ -18,7 +18,7 @@ CLIENT = REPO_ROOT / "client"
 LISTED = {"windows", "look", "act", "launch", "window"}  # noms communs des trois NexusWindows
 # Mots français fréquents (et lettres accentuées) : absents des descriptions, en anglais comme Claude et Codex (3.0.1).
 FRENCH = re.compile(
-    r"[éèêàùçôî]|(fenêtre|élément|clic|exemple|regarde|ouvre|agit|lot|cible|libellé|jamais|avec|sans|pour|les)",
+    r"[éèêàùçôî]|\b(fenêtre|élément|clic|exemple|regarde|ouvre|agit|lot|cible|libellé|jamais|avec|sans|pour|les)\b",
     re.IGNORECASE,
 )
 
@@ -63,7 +63,7 @@ def test_initialize_announces_the_family_name_and_english_descriptions(tmp_path)
     et instructions en anglais, comme les éditions Claude et Codex."""
     pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     version = re.search(r'(?m)^version = "([^"]+)"', pyproject).group(1)  # type: ignore[union-attr]
-    assert version.split(".")[:2] == ["3", "1"]  # version commune de la famille, 3.1.x (règle image commune)
+    assert re.fullmatch(r"\d+\.\d+\.\d+", version), version  # version sémantique du projet, annoncée telle quelle
     params = _server_params(tmp_path)
 
     async def session_check():

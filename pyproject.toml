@@ -1,6 +1,6 @@
 [project]
 name = "nexus-windows-antigravity"
-version = "3.1.2"
+version = "3.1.3"
 description = "NexusWindows for Antigravity: Windows computer use in the background for Google Antigravity (MCP server)."
 readme = "README.md"
 license = "MIT"
@@ -64,8 +64,8 @@ link-mode = "copy"
 [tool.ruff]
 line-length = 120
 target-version = "py311"
-# Copie publique seulement : modules de shared copiés dans client/ par l'export (vérifiés dans leur propre dépôt).
-extend-exclude = ["client/foreground_lock.py", "client/garde_fous.py", "plugins-marketplace"]
+# Copie publique seulement : modules de NexusWindows/commun copiés dans client/ par l'export (vérifiés dans leur propre dépôt).
+extend-exclude = ["client/foreground_lock.py", "client/garde_fous.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP"]
@@ -77,5 +77,5 @@ pythonpath = ["."]
 [tool.pyright]
 include = ["client", "scripts", "tests"]
 pythonVersion = "3.11"
-# Modules charges par chemin (sys.path) : le client et les modules communs du dossier shared voisin.
-extraPaths = ["client", ".", "../shared"]
+# Modules charges par chemin (sys.path) : le client et les modules communs du dossier commun voisin (NexusWindows/commun).
+extraPaths = ["client", ".", "../commun"]

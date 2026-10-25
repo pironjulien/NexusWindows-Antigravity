@@ -3,7 +3,7 @@
   "name": "io.github.pironjulien/nexus-windows-antigravity",
   "title": "NexusWindows for Antigravity",
   "description": "Windows computer use in the background for Antigravity: UI Automation, Win32 messages, read back.",
-  "version": "3.1.2",
+  "version": "3.1.3",
   "websiteUrl": "https://julienpiron.fr/nexuswindows/antigravity/",
   "repository": {
     "url": "https://github.com/pironjulien/NexusWindows-Antigravity",
@@ -14,7 +14,7 @@
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "nexus-windows-antigravity",
-      "version": "3.1.2",
+      "version": "3.1.3",
       "runtimeHint": "uvx",
       "runtimeArguments": [
         {

@@ -5,7 +5,7 @@ GetLastInputInfo compte toute entrée, injectée comprise : NexusAGY se voyait l
 périphérique d'origine : une entrée injectée n'en a pas (hDevice nul). Une fenêtre de premier niveau jamais affichée
 reçoit ces notifications en arrière-plan (RIDEV_INPUTSINK), sur un fil dédié. Aucun crochet : rien ne
 s'insère dans la chaîne d'entrée de Julien, aucune latence ajoutée, et le contenu des touches n'est ni lu ni gardé,
-seulement l'instant de la dernière entrée physique (inspiré de NexusClaude/nexus-windows physical.py).
+seulement l'instant de la dernière entrée physique (inspiré de NexusWindows/claude physical.py).
 
 Repli si Raw Input est indisponible : GetLastInputInfo, en écartant les fenêtres de temps des injections de NexusAGY
 (`injecting()` autour de chaque SendInput). Limite assumée du repli : une frappe de Julien pendant une injection de
@@ -28,7 +28,6 @@ from ctypes import wintypes
 
 WM_INPUT, RID_INPUT, RIDEV_INPUTSINK = 0x00FF, 0x10000003, 0x00000100
 RIM_TYPEMOUSE, RIM_TYPEKEYBOARD = 0, 1
-HWND_MESSAGE = wintypes.HWND(-3)
 LRESULT = ctypes.c_ssize_t
 WNDPROC = ctypes.WINFUNCTYPE(LRESULT, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
 INJECTION_GRACE_MS = 60  # une injection est vue par GetLastInputInfo jusqu'à ce délai après son envoi

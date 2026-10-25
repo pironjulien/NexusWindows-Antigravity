@@ -1,4 +1,4 @@
-"""Revue de Claude du 17/10/2026 (NexusHarness/shared/revue-agy-2026-10-17.md, partie B) : un test par point, écrit
+"""Revue de Claude du 17/10/2026 (NexusHarness/NexusShared/revues/revue-agy-2026-10-17.md, partie B) : un test par point, écrit
 pour échouer sur l'ancien code. Hors ligne : aucune vraie fenêtre de Julien n'est touchée, aucune vraie entrée n'est
 envoyée (SendInput, curseur, premier plan et jeton commun neutralisés), le presse-papiers de Julien est sauvé puis
 rendu à l'identique."""
@@ -395,7 +395,7 @@ def test_b3_open_path_success_only_when_a_window_is_read_back(tmp_path, monkeypa
 # B4 : jamais de faux succès
 # =============================================================================
 class _Field:
-    """Champ UIA dont l'application complète la saisie (« Julien » → « Julien Piron »)."""
+    """Champ UIA dont l'application complète la saisie (« Alice » → « Alice Martin »)."""
 
     def __init__(self, transform):
         self.value = ""
@@ -423,13 +423,13 @@ def field_window(monkeypatch):
 
 
 def test_b4_text_read_back_must_be_exactly_the_text(field_window):
-    field = _Field(lambda text: text + " Piron")
+    field = _Field(lambda text: text + " Martin")
     field_window(field)
-    res = computer_client.type_text("Julien", hwnd=TARGET, element_index=1, clear_first=True)
-    assert res["verified"] is not True and res["success"] is not True  # « Julien Piron » ≠ « Julien »
+    res = computer_client.type_text("Alice", hwnd=TARGET, element_index=1, clear_first=True)
+    assert res["verified"] is not True and res["success"] is not True  # « Alice Martin » ≠ « Alice »
     exact = _Field(lambda text: "  ".join(text.split(" ")))  # espaces doublés : égalité normalisée
     field_window(exact)
-    assert computer_client.type_text("Julien Piron", hwnd=TARGET, element_index=1, clear_first=True)["verified"]
+    assert computer_client.type_text("Alice Martin", hwnd=TARGET, element_index=1, clear_first=True)["verified"]
 
 
 def test_b4_presence_postcondition_never_skips_the_step(monkeypatch):

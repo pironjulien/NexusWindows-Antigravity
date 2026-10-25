@@ -1,4 +1,4 @@
-"""Journal commun des trois Nexus Windows (NexusHarness/shared/journal/FORMAT.md) : une ligne par action, sans texte
+"""Journal commun des trois Nexus Windows (NexusHarness/NexusShared/journal/FORMAT.md) : une ligne par action, sans texte
 d'écran (ni texte tapé, ni libellé, ni titre), en plus de computer.log. Écrit au niveau du serveur MCP, là où passe
 CHAQUE appel d'action (lots, ouverture, fermeture, défilement, glisser, refus, arrêts : relecture d'Antigravity du
 23/10, qui voyait ces actions échapper à _log). Jamais d'exception vers l'outil."""

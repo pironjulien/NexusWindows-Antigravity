@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NexusAGY Computer Engine : le bureau Windows de Julien piloté en arrière-plan (UI Automation, messages Win32),
+NexusWindows pour Antigravity, moteur : le bureau Windows de Julien piloté en arrière-plan (UI Automation, messages Win32),
 vraie souris/clavier en repli seulement.
 
 Garde-fous DANS le code (revue de Claude du 17/10/2026, pensés pour un modèle rapide et crédule) : fenêtre toujours
@@ -30,10 +30,10 @@ from ctypes import wintypes
 from pathlib import Path
 from typing import Any, Literal, overload
 
-# Politique commune des garde-fous de bureau (Claude et Antigravity) : NexusHarness/shared/garde-fous.json, lue par
-# shared/garde_fous.py. Accord « garde-fous » du 18/10/2026 (journal de la trinité). Illisible : le module ne se
+# Politique commune des garde-fous de bureau (Claude et Antigravity) : NexusWindows/commun/garde-fous.json, lue par
+# commun/garde_fous.py. Accord « garde-fous » du 18/10/2026 (journal de la trinité). Illisible : le module ne se
 # charge pas (échec fermé : aucun outil de bureau sans politique).
-SHARED_DIR = Path(__file__).resolve().parent.parent.parent / "shared"
+SHARED_DIR = Path(__file__).resolve().parent.parent.parent / "commun"
 if str(SHARED_DIR) not in sys.path:
     sys.path.insert(0, str(SHARED_DIR))
 import garde_fous  # noqa: E402
@@ -181,7 +181,6 @@ except Exception:  # noqa: BLE001 - comtypes/UIAutomationCore indisponible : lec
 INPUT_MOUSE = 0
 INPUT_KEYBOARD = 1
 
-MOUSEEVENTF_MOVE = 0x0001
 MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
 MOUSEEVENTF_RIGHTDOWN = 0x0008
@@ -190,12 +189,10 @@ MOUSEEVENTF_MIDDLEDOWN = 0x0020
 MOUSEEVENTF_MIDDLEUP = 0x0040
 MOUSEEVENTF_WHEEL = 0x0800
 MOUSEEVENTF_HWHEEL = 0x1000
-MOUSEEVENTF_ABSOLUTE = 0x8000
 
 KEYEVENTF_EXTENDEDKEY = 0x0001
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_UNICODE = 0x0004
-KEYEVENTF_SCANCODE = 0x0008
 
 DWMWA_EXTENDED_FRAME_BOUNDS = 9
 DWMWA_CLOAKED = 14
@@ -591,7 +588,7 @@ def ensure_screen_readable() -> None:
 # -----------------------------------------------------------------------------
 # Confirmation : ce qui part chez un tiers, coûte de l'argent ou ne se rattrape pas
 # -----------------------------------------------------------------------------
-# UNE liste commune (shared/garde-fous.json, « confirmation »), facile à vider : payer, acheter, commander, virer de l'argent, envoyer un message, publier, supprimer
+# UNE liste commune (NexusWindows/commun/garde-fous.json, « confirmation »), facile à vider : payer, acheter, commander, virer de l'argent, envoyer un message, publier, supprimer
 # définitivement ; depuis 2.8.0 aussi désinstaller, formater, réinitialiser, résilier, supprimer un compte, effacer les
 # données. Tout le reste (supprimer simple, valider, confirmer, s'abonner, accepter…) passe sans confirm, sauf
 # valider/confirmer dans une fenêtre qui parle de paiement ou de virement, et démarrer/OK dans celle d'un formatage
@@ -1585,7 +1582,7 @@ def focus_window(
 ) -> dict[str, Any]:
     """Brings the target application window to the foreground and restores if minimized.
 
-    Mise au premier plan voulue = jeton commun (shared/foreground-token.md) : déjà tenu quand une garde l'appelle
+    Mise au premier plan voulue = jeton commun (NexusWindows/commun/foreground-token.md) : déjà tenu quand une garde l'appelle
     (réentrant), sinon pris ici ; tenu par un autre agent → rien n'est fait, le détenteur est nommé. Fenêtre
     toujours désignée sans ambiguïté (jamais celle de devant par défaut)."""
     emergency_stop.check()
@@ -1627,7 +1624,7 @@ def _take_foreground_token(purpose: str):
     """Prend le jeton commun souris/premier plan pour NexusAGY (réentrant) ; refuse si un autre agent le tient au-delà
     de l'attente ou s'il est inaccessible : jamais de mise au premier plan sans lui."""
     try:
-        shared_dir = Path(__file__).resolve().parent.parent.parent / "shared"
+        shared_dir = Path(__file__).resolve().parent.parent.parent / "commun"
         if shared_dir.exists() and str(shared_dir) not in sys.path:
             sys.path.insert(0, str(shared_dir))
         from foreground_lock import ForegroundLock, holder
@@ -1859,7 +1856,7 @@ def _title_names_file(title: Any, file_name: str) -> bool:
     return False
 
 
-# Application Chromium/Electron lancée recouverte (recette commune, benchmarks/windows/RECETTES.md, 24/10) : sans ces
+# Application Chromium/Electron lancée recouverte (recette commune, NexusWindows/commun/benchmarks/windows/RECETTES.md, 24/10) : sans ces
 # commutateurs, Chromium ne dessine ni ne publie à l'accessibilité une fenêtre recouverte dès son démarrage (Logi
 # Options+ resté sur son écran de démarrage violet derrière Claude agrandi ; banc « lancement recouvert » : bouton
 # introuvable, 0/3). Chromium ne retient que le DERNIER --disable-features : un seul, fusionné.
@@ -2135,7 +2132,7 @@ def capture_window_image(
 ) -> tuple[bytes, dict[str, Any]]: ...
 
 
-# Règle image commune des produits Nexus (shared/images.md, 24/10) : côté long ≤ 1568 px et ≤ 1,15 Mpx (Gemini 3,
+# Règle image commune des produits Nexus (NexusShared/images.md, 24/10) : côté long ≤ 1568 px et ≤ 1,15 Mpx (Gemini 3,
 # Claude et GPT-5.x lisent cette taille sans la réduire), WebP sans perte jusqu'à 200 Ko, puis qualité 85, 70…
 # jusqu'à tenir 500 Ko : au-delà, Antigravity échoue en 400 (crash vu avant le 24/10).
 IMAGE_MAX_SIDE = 1568
@@ -2168,7 +2165,7 @@ def encode_webp(img: Image.Image) -> bytes:
 
 def image_print(img: Image.Image) -> str:
     """Empreinte EXACTE d'une image (dimensions et pixels RGB) : même écran que la dernière image envoyée = pas de
-    double. Pas l'empreinte grise 64×64 de shared/images.md : un voyant rouge devenu vert y garde le même gris
+    double. Pas l'empreinte grise 64×64 de NexusShared/images.md : un voyant rouge devenu vert y garde le même gris
     (relecture de Codex du 24/10) et disparaîtrait de la réponse."""
     rgb = img.convert("RGB")
     return hashlib.sha256(f"{rgb.width}x{rgb.height}:".encode() + rgb.tobytes()).hexdigest()
@@ -3012,7 +3009,7 @@ def _wait_window_effect(
 def _other_agent_holds_token() -> bool:
     """Vrai si un AUTRE agent tient le jeton commun (il a mis sa fenêtre devant : ne pas la lui reprendre)."""
     try:
-        shared_dir = Path(__file__).resolve().parent.parent.parent / "shared"
+        shared_dir = Path(__file__).resolve().parent.parent.parent / "commun"
         if shared_dir.exists() and str(shared_dir) not in sys.path:
             sys.path.insert(0, str(shared_dir))
         from foreground_lock import holder
@@ -4056,7 +4053,7 @@ def _same_text(read: Any, expected: Any) -> bool:
 
 def _text_matches(read: str | None, expected: str) -> bool | None:
     """Vrai si le texte relu est EXACTEMENT celui voulu (espaces normalisés), None si illisible. « Julien » relu
-    « Julien Piron » est faux."""
+    « Alice Martin » est faux."""
     if read is None:
         return None
     return _same_text(read, expected)

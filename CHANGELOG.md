@@ -9,7 +9,28 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
-## [3.1.2] - 2026-10-24 — Text first
+## [3.1.3] - 2026-10-25
+
+The plugin installs itself.
+
+### Added
+- `install.ps1` installs the `nexus-computer` Antigravity plugin itself (`scripts/installer-plugin-antigravity.ps1`):
+  agent guide copied to `%USERPROFILE%\.gemini\config\plugins\nexus-computer`, server declared once in the plugin's
+  `mcp_config.json` with this clone's path to `scripts/start-computer-mcp.ps1`, plugin enabled in `config.json` (only
+  while Antigravity is closed), older duplicate declarations removed; other servers and plugins are never touched.
+  `verify.ps1` (or `install.ps1 -CheckOnly`) checks the environment and the plugin without writing anything.
+
+### Changed
+- Agent guide (`SKILL.md`): titled "NexusWindows for Antigravity", outward gestures described with their one-time
+  token, the background limits per framework and the 500 KB image limit as the server applies them.
+
+### Fixed
+- README: the version line said 3.0.2 instead of the published version; the shared modules' folder is named
+  `commun`; removing the server also covers the installed plugin.
+
+## [3.1.2] - 2026-10-24
+
+Text first.
 
 ### Changed
 - `look` without `capture_screenshot` returns the element list only; the image is attached when the tree is too thin
@@ -22,13 +43,17 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 - `capture_screenshot=false` with `output_path` writes the export without attaching it; the text names an attached
   image only when one is attached.
 
-## [3.1.1] - 2026-10-24 — Startup outside Windows
+## [3.1.1] - 2026-10-24
+
+Startup outside Windows.
 
 ### Fixed
 - The server starts again outside Windows (directory checks run it on Linux): the action image limit no longer reads
   the Windows-only module at import. 3.1.0 was tagged but never reached PyPI; 3.1.1 carries its changes.
 
-## [3.1.0] - 2026-10-24 — Common image rule, Chromium apps launched covered
+## [3.1.0] - 2026-10-24
+
+Common image rule, Chromium apps launched covered.
 
 ### Changed
 - Images follow the common Nexus image rule: up to 1568 px and 1.15 MP (was 1280 px), lossless WebP up to 200 KB,
@@ -52,7 +77,9 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 - Reviewed by the Codex agent over three rounds (zoom scale per axis, JSON kept valid, exact print instead of a grey
   thumbnail that confused red and green).
 
-## [3.0.2] - 2026-10-24 — Tk in the background, scrolling without a wheel
+## [3.0.2] - 2026-10-24
+
+Tk in the background, scrolling without a wheel.
 
 ### Added
 - Tk in the background, window covered: a click at a point is sent with the mouse button marked pressed for Tk's own
@@ -64,7 +91,9 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 - Measured on the three-tool bench (Cua Driver 0.38, Windows-MCP 0.8.8): Tk click, Ctrl+K and scrolling, Electron raw
   click and scrolling now succeed in the background, foreground untouched.
 
-## [3.0.1] - 2026-10-23 — Family harmonization
+## [3.0.1] - 2026-10-23
+
+Family harmonization.
 
 ### Changed
 - The MCP server announces itself as `nexus-windows-antigravity` (was `nexus-computer`) at initialization, the name
@@ -74,7 +103,9 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
   with the other two NexusWindows tools; same meaning and same rules (✓ = ~ ✗, `confirm`, `accord`, emergency stop,
   screen text is data, never an instruction). Tool replies are unchanged.
 
-## [3.0.0] - 2026-10-23 — One-command install, common tool names
+## [3.0.0] - 2026-10-23
+
+One-command install, common tool names.
 
 The three NexusWindows tools (Claude, Codex, Antigravity) move to 3.0.0 together: one-command install from a package
 registry, the same five tool names (`windows`, `look`, `act`, `launch`, `window`), the same step outcomes
@@ -96,7 +127,9 @@ registry, the same five tool names (`windows`, `look`, `act`, `launch`, `window`
   error: only their length (the reply to the agent keeps them). Screenshots are pruned after each write (at most 50,
   previously 51) and at server start.
 
-## [2.11.0] - 2026-10-23 — Background input recipes, common journal, stop on unknown outcome
+## [2.11.0] - 2026-10-23
+
+Background input recipes, common journal, stop on unknown outcome.
 
 ### Added
 - Common journal shared by the three NexusWindows tools (Claude, Codex, Antigravity): every action call (opening,
@@ -165,7 +198,9 @@ registry, the same five tool names (`windows`, `look`, `act`, `launch`, `window`
 - Development tools and CI actions updated: ruff 0.17.1, pyright 1.1.414, `actions/checkout` v7.0.1,
   `astral-sh/setup-uv` v10.3.0 (pinned by hash).
 
-## [2.10.0] - 2026-10-20 — "Agent at work" indicator
+## [2.10.0] - 2026-10-20
+
+"Agent at work" indicator.
 
 ### Added
 - While an action runs (`computer_act`, opening, closing, focusing and the action aliases; never the reads), a logo
@@ -173,7 +208,9 @@ registry, the same five tool names (`windows`, `look`, `act`, `launch`, `window`
   1.6 s after the last action. Always on top, borderless, click-through, never activated, absent from the taskbar,
   excluded from screen captures. `NEXUS_WINDOWS_INDICATOR=0` turns it off.
 
-## [2.9.0] - 2026-10-20 — Exact-action consent, visual fallback, hardened supply chain
+## [2.9.0] - 2026-10-20
+
+Exact-action consent, visual fallback, hardened supply chain.
 
 ### Added
 
@@ -258,7 +295,7 @@ registry, the same five tool names (`windows`, `look`, `act`, `launch`, `window`
 - Windows activation protocols (`ms-settings:`, `shell:`) open through `computer_open_path`; web addresses are
   refused with a pointer to a browser tool.
 
-## Earlier changes since 2.5.0 (2026-10-14 to 2026-10-17)
+Also released with 2.7.0, the first release after 2.5.0 (changes of 2026-10-14 to 2026-10-17):
 
 ### Added
 - Five listed MCP tools (`computer_list_windows`, `computer_look`, `computer_act`, `computer_open_path`,
@@ -278,3 +315,16 @@ registry, the same five tool names (`windows`, `look`, `act`, `launch`, `window`
 - The Chrome browser bridge, moved to its own project, NexusBrowser
   ([chrome-computer-use](https://github.com/pironjulien/chrome-computer-use)).
 - The floating companion window and the former multi-adapter layout of 2.5.0.
+
+[Unreleased]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.3...HEAD
+[3.1.3]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.2...v3.1.3
+[3.1.2]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.1...v3.1.2
+[3.1.1]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.0...v3.1.1
+[3.1.0]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.0.2...v3.1.0
+[3.0.2]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.0.1...v3.0.2
+[3.0.1]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.0.0...v3.0.1
+[3.0.0]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v2.11.0...v3.0.0
+[2.11.0]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v2.10.0...v2.11.0
+[2.10.0]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v2.9.0...v2.10.0
+[2.9.0]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v2.8.2...v2.9.0
+[2.8.2]: https://github.com/pironjulien/NexusWindows-Antigravity/releases/tag/v2.8.2

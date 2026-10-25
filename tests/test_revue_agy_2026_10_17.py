@@ -1,4 +1,4 @@
-"""Revue d'Antigravity du 17/10/2026 (NexusHarness/shared/reponse-agy-2026-10-17.md, partie 1) : un test par point
+"""Revue d'Antigravity du 17/10/2026 (NexusHarness/NexusShared/revues/reponse-agy-2026-10-17.md, partie 1) : un test par point
 corrigé, écrit pour échouer sur l'ancien code (1.1 : tests/test_sync.py). Hors ligne : aucune vraie fenêtre de Julien
 n'est touchée, aucune vraie entrée n'est envoyée, aucun document n'est ouvert (os.startfile simulé)."""
 

@@ -365,7 +365,7 @@ def test_hotkey_note_surfaces_in_computer_results(monkeypatch):
 # Mise au premier plan voulue : jeton commun (essai de cohabitation du 16/10)
 # -----------------------------------------------------------------------------
 def _shared_lock_module():
-    shared_dir = REPO_ROOT.parent / "shared"
+    shared_dir = REPO_ROOT.parent / "commun"
     if str(shared_dir) not in sys.path:
         sys.path.insert(0, str(shared_dir))
     import foreground_lock

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NexusAGY Computer Engine - Structured High-Visibility Logger.
+NexusWindows pour Antigravity - Structured High-Visibility Logger.
 Persists execution logs to ~/.nexusagy/computer.log with rotation and timing telemetry.
 """
 

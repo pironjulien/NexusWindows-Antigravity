@@ -1,5 +1,7 @@
 param([switch]$Full)
 $ErrorActionPreference = "Stop"
+# Aucun __pycache__ dans OneDrive, meme lance seul (hors test.ps1 racine).
+$env:PYTHONDONTWRITEBYTECODE = '1'
 . (Join-Path $PSScriptRoot "scripts\runtime.ps1")
 if (-not (Test-Path $pythonExe)) { throw "Executer install.ps1 pour preparer le runtime local." }
 & $pythonExe -m ruff check --cache-dir "$localRoot\ruff-cache" $PSScriptRoot
