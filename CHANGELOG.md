@@ -9,6 +9,14 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.1.7] - 2026-10-25
+
+### Changed
+- README installation: uv is installed with winget (package `astral-sh.uv`) instead of downloading and running a
+  PowerShell script (`irm … | iex`), a command line that Microsoft Defender can flag; the same line then reloads
+  `PATH` from Windows, so it works whether winget adds `uv` to `PATH` directly or through its links folder. Checked
+  on a blank profile.
+
 ## [3.1.6] - 2026-10-25
 
 The mouse wheel in Chromium, as the other editions do it.
@@ -365,7 +373,8 @@ Also released with 2.7.0, the first release after 2.5.0 (changes of 2026-10-14 t
   ([chrome-computer-use](https://github.com/pironjulien/chrome-computer-use)).
 - The floating companion window and the former multi-adapter layout of 2.5.0.
 
-[Unreleased]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.6...HEAD
+[Unreleased]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.7...HEAD
+[3.1.7]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.6...v3.1.7
 [3.1.6]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.5...v3.1.6
 [3.1.5]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.4...v3.1.5
 [3.1.4]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.3...v3.1.4

@@ -20,7 +20,7 @@ Antigravity (Gemini) see and operate Windows desktop applications while the user
 foreground window. Built for a fast model: one look, then one batch of steps with label targets, and every reply
 says what to do next.
 
-Version 3.1.6 · Windows 10/11 · Python 3.11+ · MIT licence
+Version 3.1.7 · Windows 10/11 · Python 3.11+ · MIT licence
 
 Part of the Nexus family: [NexusWindows](https://julienpiron.fr/nexuswindows/)
 ([Claude](https://github.com/pironjulien/NexusWindows-Claude) ·
@@ -56,15 +56,18 @@ bench.
 ## Installation
 
 Requirements: Windows 10 or 11 and [Google Antigravity](https://antigravity.google/download). Nothing else to
-install by hand: the command below installs [uv](https://docs.astral.sh/uv/) (Astral's official installer), which
-brings Python 3.14 and the server from [PyPI](https://pypi.org/project/nexus-windows-antigravity/).
+install by hand: the command below installs [uv](https://docs.astral.sh/uv/) with winget (Windows' own package
+manager, package `astral-sh.uv`), which brings Python 3.14 and the server from
+[PyPI](https://pypi.org/project/nexus-windows-antigravity/). No script is downloaded and run.
 
 1. Open **PowerShell** (Start menu, type `PowerShell`, Enter).
 2. Paste this line and press Enter:
 
    ```powershell
-   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"; $env:Path = "$HOME\.local\bin;$env:Path"; uvx --python 3.14 nexus-windows-antigravity@latest install
+   winget install --id astral-sh.uv -e --accept-source-agreements --accept-package-agreements; $env:Path = [Environment]::GetEnvironmentVariable('Path','User') + ';' + [Environment]::GetEnvironmentVariable('Path','Machine'); uvx --python 3.14 nexus-windows-antigravity@latest install
    ```
+
+   (uv already installed: `uvx --python 3.14 nexus-windows-antigravity@latest install` is enough.)
 
 3. Restart Antigravity. The `nexus-computer` plugin appears under **Customizations > Installed**, with its five tools
    and the agent guide. Ask for example: *"In Notepad, behind my window, type a shopping list and save it on the
