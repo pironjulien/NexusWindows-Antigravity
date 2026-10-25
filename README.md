@@ -20,7 +20,7 @@ Antigravity (Gemini) see and operate Windows desktop applications while the user
 foreground window. Built for a fast model: one look, then one batch of steps with label targets, and every reply
 says what to do next.
 
-Version 3.1.7 · Windows 10/11 · Python 3.11+ · MIT licence
+Version 3.2.0 · Windows 10/11 · Python 3.11+ · MIT licence
 
 Part of the Nexus family: [NexusWindows](https://julienpiron.fr/nexuswindows/)
 ([Claude](https://github.com/pironjulien/NexusWindows-Claude) ·
@@ -76,12 +76,14 @@ manager, package `astral-sh.uv`), which brings Python 3.14 and the server from
 What the `install` command does: it writes the `nexus-computer` plugin into
 `%USERPROFILE%\.gemini\config\plugins\nexus-computer`, the folder Antigravity loads plugins from: the agent guide
 ([`SKILL.md`](https://github.com/pironjulien/NexusWindows-Antigravity/blob/main/plugins/nexus-computer/skills/nexus-computer/SKILL.md)),
-the plugin manifest, and `mcp_config.json`, which declares the server once, pinned to the installed version
-(`uvx --python 3.14 nexus-windows-antigravity==<version>`). It removes an older manual declaration of the same server
+the plugin manifest, and `mcp_config.json`, which declares the server once at its latest version
+(`uvx --python 3.14 nexus-windows-antigravity@latest`): each Antigravity start runs the newest published version. It
+removes an older manual declaration of the same server
 from the global `mcp_config.json`; other servers, plugins and Antigravity settings are never touched. A plugin is
 enabled by default; if you turned it off, it says so and leaves your choice.
 
-- **Update**: run the same line again (`@latest` installs the newest version and moves the pin).
+- **Update**: automatic, at the next Antigravity start. Installed with 3.1.4 to 3.1.7 (pinned version): run the line
+  once more.
 - **Check**: `uvx --python 3.14 nexus-windows-antigravity install --check` (writes nothing).
 - **Remove**: `uvx --python 3.14 nexus-windows-antigravity uninstall`.
 
@@ -216,8 +218,9 @@ has no background mode: it reached no effect without taking the screen.
 
 ## Privacy
 
-NexusWindows for Antigravity runs entirely on your PC. It has no account, no telemetry, no analytics and makes no
-network requests of its own.
+NexusWindows for Antigravity runs entirely on your PC. It has no account, no telemetry and no analytics. Its only network
+request of its own is a version check: at most once a day, a GET of `https://pypi.org/pypi/nexus-windows-antigravity/json`
+(nothing about you or your PC is sent); `NEXUS_UPDATE_CHECK=off` in the server environment turns it off.
 
 - **What it reads**: window titles, the accessibility tree and window images of the applications the agent works
   in, only when a tool is called. Password managers are neither read nor driven.
@@ -228,13 +231,15 @@ network requests of its own.
   window, duration, outcome and short details such as a target label, coordinates, key names, a menu path or the
   number of characters typed, never the typed or expected text; rotated at 5 MB, three backups) and screenshots (at
   most 50 after each capture; those older than 24 hours are purged at the next capture and at server start, so a
-  stopped server can leave its last screenshots until it starts again). Under `~/.nexus/`: the shared foreground token and emergency-stop state.
+  stopped server can leave its last screenshots until it starts again). Under `~/.nexus/`: the shared foreground token and emergency-stop state,
+  and `status/windows-antigravity.json` (installed version, latest version, time of the last check), read by the
+  Nexus app.
   Under `%LOCALAPPDATA%\NexusJournal\windows\antigravity\` (or `NEXUS_JOURNAL_HOME`): a short monthly JSONL journal,
   in the same format as the other NexusWindows tools (app executable name, action, technique, outcome, duration,
   whether the foreground was used, and the first words of an error, cut before any quote, colon or bracket); never
   typed text, screen text, labels, titles or paths. The server never deletes it.
 - **Removing it**: `uvx --python 3.14 nexus-windows-antigravity uninstall` (or remove the server from Antigravity's
-  MCP settings), then delete `~/.nexusagy/` (and
+  MCP settings), then delete `~/.nexusagy/`, `~/.nexus/status/windows-antigravity.json` (and
   `%LOCALAPPDATA%\NexusJournal`).
 
 Questions or concerns: open an issue on this repository.

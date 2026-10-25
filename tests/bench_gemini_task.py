@@ -278,6 +278,15 @@ def main() -> int:
     raw_ok = physical_input.start(timeout_s=2.0)
     if cc.uia_fast is not None:
         cc.uia_fast.reader()
+    # Règle commune des bancs : aucune fenêtre de test si Julien est actif ; s'il revient, tout est fermé aussitôt et
+    # le banc s'arrête sans être compté (code 3).
+    guard = df.PresenceGuard(physical_input)
+    try:
+        guard.require_absent()
+    except df.JulienActive as active:
+        print(f"Banc Gemini non lancé : {active}")
+        return 3
+    guard.start()
     idle = physical_input.user_idle_s() if raw_ok else 0.0
     real = raw_ok and idle >= PHYSICAL_IDLE_S
     meter = PhysicalMeter(cc, real)
@@ -288,9 +297,17 @@ def main() -> int:
     try:
         for family in [f.strip().lower() for f in args.families.split(",") if f.strip()]:
             for scenario in ("naïf", "guidé", "liste ouverte"):
+                guard.check()
                 rows.append(run_scenario(mcp, cc, df, families[family], scenario, meter, watch))
+    except Exception:
+        if not guard.returned:
+            raise
     finally:
+        guard.stop()
         watch.stop()
+    if guard.returned:
+        print("Banc Gemini interrompu : Julien est revenu, fenêtres de test fermées aussitôt, rien n'est compté.")
+        return 3
 
     mode = "réels (Julien inactif)" if real else f"interceptés (Julien actif : inactif depuis {idle:.0f} s)"
     print(f"Banc Gemini {args.label} — client {client_dir} — gestes physiques {mode}")

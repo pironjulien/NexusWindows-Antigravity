@@ -38,12 +38,11 @@ def launcher(tmp_path) -> Path:
 
 
 def test_plugin_is_declared_once_and_config_json_never_written(tmp_path, monkeypatch):
-    """From PyPI: the server is declared once, pinned to this version through uvx; a discovered plugin is enabled by
-    default, so config.json is left alone (Antigravity rewrites it on exit)."""
+    """From PyPI: the server is declared once, at its latest version through uvx (updated at each Antigravity start);
+    a discovered plugin is enabled by default, so config.json is left alone (Antigravity rewrites it on exit)."""
     sys.path.insert(0, str(ROOT / "client"))
     import install_antigravity
 
-    monkeypatch.setattr(install_antigravity, "package_version", lambda: "9.9.9")
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "pc"))
     assert install_antigravity.main(["install", "--check"]) == 1
     assert not (tmp_path / "pc/.gemini").exists()  # --check never writes
@@ -53,7 +52,7 @@ def test_plugin_is_declared_once_and_config_json_never_written(tmp_path, monkeyp
     server = read_json(config / "plugins/nexus-computer/mcp_config.json")["mcpServers"]
     assert list(server) == ["nexus-computer"]
     assert Path(server["nexus-computer"]["command"]).stem.lower() == "uvx"
-    assert server["nexus-computer"]["args"] == ["--python", "3.14", "nexus-windows-antigravity==9.9.9"]
+    assert server["nexus-computer"]["args"] == ["--python", "3.14", "nexus-windows-antigravity@latest"]
     assert server["nexus-computer"]["env"] == {"PYTHONUTF8": "1"}
     assert not (config / "mcp_config.json").exists() and not (config / "config.json").exists()
     assert (config / "plugins/nexus-computer" / SKILL).read_bytes() == (PLUGIN_SOURCE / SKILL).read_bytes()

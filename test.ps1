@@ -18,10 +18,16 @@ if ($LASTEXITCODE) { exit $LASTEXITCODE }
 & $pythonExe -m pytest (Join-Path $PSScriptRoot "tests") -q -o "cache_dir=$localRoot\pytest-cache"
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 if ($Full) {
-    # Validation reelle du bureau : fenetres de test Win32, WinForms et WPF creees, affichees sans activation et fermees a
-    # la fin ; actions par messages et UI Automation relues, aucun vol de premier plan. Vraie souris/clavier
-    # seulement si Julien est inactif depuis 120 s (sinon sautees, jamais comptees reussies).
+    # Validation reelle du bureau : fenetres de test Win32, WinForms et WPF creees, affichees sans activation, au bas de
+    # l'empilement, et fermees a la fin ; actions par messages et UI Automation relues, aucun vol de premier plan.
+    # Regle commune des bancs : aucune fenetre si Julien est actif depuis moins de 120 s ; s'il revient, tout est
+    # ferme aussitot et rien n'est compte (code 3).
     & $pythonExe (Join-Path $PSScriptRoot "tests\live_computer_validation.py")
+    if ($LASTEXITCODE -eq 3) {
+        # Julien actif, ou revenu pendant la validation : fenetres de test jamais ouvertes ou fermees aussitot.
+        Write-Host "Validation reelle du bureau : non faite (Julien actif), a relancer quand il est absent."
+        exit 3
+    }
     if ($LASTEXITCODE) {
         Write-Error "Validation reelle du bureau en echec (code $LASTEXITCODE)." -ErrorAction Continue
         exit $LASTEXITCODE

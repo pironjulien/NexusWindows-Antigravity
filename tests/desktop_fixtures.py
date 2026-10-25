@@ -27,6 +27,69 @@ user32.GetForegroundWindow.restype = wintypes.HWND
 user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
 user32.PostMessageW.argtypes = (wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
 
+# Règle commune des bancs (banc commun 7331db8, après l'incident du 25/10 : un labo apparu devant Julien) : aucune
+# fenêtre de test tant que Julien n'est pas absent depuis ABSENCE_S ; à sa première entrée physique pendant l'essai,
+# toutes les fenêtres de test ouvertes sont fermées aussitôt et l'essai n'est pas compté.
+ABSENCE_S = 120.0
+LIVE: set = set()  # fenêtres de test ouvertes (fermées d'un coup si Julien revient)
+ABORT = threading.Event()
+
+
+class JulienActive(RuntimeError):
+    """Julien est actif, ou revenu pendant l'essai : aucune fenêtre de test, essai non compté."""
+
+
+class PresenceGuard:
+    """Présence de Julien surveillée (Raw Input) pendant tout l'essai."""
+
+    def __init__(self, physical_input, poll_s: float = 0.1):
+        self.pi = physical_input
+        self.poll_s = poll_s
+        self.returned = False
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def require_absent(self) -> None:
+        idle = self.pi.user_idle_s()
+        if idle < ABSENCE_S:
+            raise JulienActive(
+                f"Julien actif (inactif depuis {idle:.0f} s < {ABSENCE_S:.0f} s) : aucune fenêtre de test ouverte, "
+                "relancer quand il est absent."
+            )
+
+    def start(self) -> None:
+        ABORT.clear()
+        token = self.pi.mark()
+
+        def run() -> None:
+            while not self._stop.wait(self.poll_s):
+                if self.pi.user_touched_since(token):
+                    self.returned = True
+                    ABORT.set()
+                    close_all()
+                    return
+
+        self._thread = threading.Thread(target=run, daemon=True)
+        self._thread.start()
+
+    def check(self) -> None:
+        if self.returned:
+            raise JulienActive("Julien est revenu : fenêtres de test fermées, essai interrompu et non compté.")
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2)
+
+
+def close_all() -> None:
+    for fixture in list(LIVE):
+        try:
+            fixture.close()
+        except Exception:  # noqa: BLE001 - fermeture d'urgence : les autres fenêtres d'abord
+            pass
+
+
 WINFORMS_FORM_TITLE = "NexusAGY banc WinForms"
 WPF_FORM_TITLE = "NexusAGY banc WPF"
 
@@ -143,6 +206,8 @@ class Fixture:
     """Processus de fenêtre de test : HWND lu sur sa sortie standard, fermeture propre (WM_CLOSE) puis forcée."""
 
     def __init__(self, name: str, args: list[str], timeout_s: float = 45.0):
+        if ABORT.is_set():
+            raise JulienActive("Julien est revenu : aucune nouvelle fenêtre de test.")
         self.name = name
         self.proc = subprocess.Popen(
             args,
@@ -168,12 +233,17 @@ class Fixture:
             self.close()
             raise RuntimeError(f"Fenêtre de test {name} non créée : {text or 'aucune sortie'} {err}".strip())
         self.hwnd = int(text)
+        LIVE.add(self)
+        if ABORT.is_set():  # revenu pendant la création : fermée aussitôt
+            self.close()
+            raise JulienActive("Julien est revenu : fenêtre de test fermée aussitôt.")
 
     @property
     def pid(self) -> int:
         return self.proc.pid
 
     def close(self) -> None:
+        LIVE.discard(self)
         if self.hwnd and user32.IsWindow(self.hwnd):
             user32.PostMessageW(self.hwnd, WM_CLOSE, 0, 0)
         try:

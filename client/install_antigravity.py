@@ -3,7 +3,7 @@
     uvx --python 3.14 nexus-windows-antigravity install      (depuis PyPI : aucun clone, ni PowerShell 7, ni Git)
 
 Le plugin (guide de l'agent, manifeste) est copié depuis le paquet ou le clone ; son `mcp_config.json` déclare le
-serveur une seule fois : `uvx --python 3.14 nexus-windows-antigravity==<cette version>` (chemin absolu de uvx, pour un
+serveur une seule fois : `uvx --python 3.14 nexus-windows-antigravity@latest` (chemin absolu de uvx, pour un
 Antigravity déjà ouvert dont le PATH est ancien), ou, depuis un clone (`install.ps1`), le lanceur
 `scripts/start-computer-mcp.ps1`. Un plugin découvert est actif par défaut (documentation embarquée d'Antigravity :
 `config.json` ne garde qu'un choix explicite de l'utilisateur) : `config.json` n'est jamais écrit, un plugin que
@@ -46,20 +46,16 @@ def plugin_source() -> Path:
     raise FileNotFoundError(f"plugin.json of {PLUGIN} not found next to {HERE}")
 
 
-def package_version() -> str:
-    from importlib.metadata import version
-
-    return version(PACKAGE)
-
-
 def server_declaration(launcher: Path | None) -> dict:
     """Déclaration unique du serveur, écrite dans le `mcp_config.json` du plugin."""
     if launcher is not None:
         return {"command": "pwsh", "args": ["-NoProfile", "-File", str(launcher)]}
     uvx = shutil.which("uvx") or "uvx"
+    # @latest : chaque démarrage d'Antigravity lance la dernière version publiée (mise à jour sans l'appli Nexus ni
+    # réinstallation ; contrat « mises à jour hors conteneur » du 26/10). Le serveur écrit son état au démarrage.
     return {
         "command": uvx,
-        "args": ["--python", "3.14", f"{PACKAGE}=={package_version()}"],
+        "args": ["--python", "3.14", f"{PACKAGE}@latest"],
         "env": {"PYTHONUTF8": "1"},
     }
 

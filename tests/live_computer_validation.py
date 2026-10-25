@@ -291,7 +291,13 @@ $form.Show()
 # Validation
 # =============================================================================
 class Fixture:
+    """Fenêtre de test dans son processus ; inscrite au garde de présence commun (desktop_fixtures.LIVE)."""
+
     def __init__(self, name: str, args: list[str], stdin: str | None = None):
+        import desktop_fixtures as df
+
+        if df.ABORT.is_set():
+            raise df.JulienActive("Julien est revenu : aucune nouvelle fenêtre de test.")
         self.name = name
         self.proc = subprocess.Popen(
             args,
@@ -321,12 +327,19 @@ class Fixture:
             self.close()
             raise RuntimeError(f"Fenêtre de test {name} non créée : {text or 'aucune sortie'} {err}".strip())
         self.hwnd = int(text)
+        df.LIVE.add(self)
+        if df.ABORT.is_set():
+            self.close()
+            raise df.JulienActive("Julien est revenu : fenêtre de test fermée aussitôt.")
 
     @property
     def pid(self) -> int:
         return self.proc.pid
 
     def close(self) -> None:
+        import desktop_fixtures as df
+
+        df.LIVE.discard(self)
         if self.hwnd and user32.IsWindow(self.hwnd):
             user32.PostMessageW(self.hwnd, WM_CLOSE, 0, 0)
         try:
@@ -732,6 +745,15 @@ def main_validation() -> int:
         "Raw Input actif (entrées physiques distinguées des injectées)", raw_ok, json.dumps(physical_input.summary())
     )
 
+    # Règle commune des bancs : aucune fenêtre de test si Julien est actif ; s'il revient, tout est fermé aussitôt et
+    # la validation s'arrête sans être comptée (code 3).
+    guard = df.PresenceGuard(physical_input)
+    try:
+        guard.require_absent()
+    except df.JulienActive as active:
+        print(f"Validation réelle non lancée : {active}")
+        return 3
+    guard.start()
     julien_fg = int(user32.GetForegroundWindow() or 0)
     cursor = cc.POINT()
     user32.GetCursorPos(ctypes.byref(cursor))
@@ -830,12 +852,21 @@ def main_validation() -> int:
                 report.add(
                     name, "skipped", f"sautée (Julien actif : inactif depuis {idle:.0f} s < {PHYSICAL_IDLE_S:.0f} s)"
                 )
+    except Exception:
+        if not guard.returned:
+            raise
     finally:
+        guard.stop()
         watch.stop()
         for fixture in fixtures:
             fixture.close()
         closed = all(not user32.IsWindow(f.hwnd) for f in fixtures)
         report.check("Fenêtres de test fermées", closed)
+    if guard.returned:
+        print(
+            "Validation réelle interrompue : Julien est revenu, fenêtres de test fermées aussitôt, rien n'est compté."
+        )
+        return 3
 
     ok = sum(1 for r in report.rows if r["status"] == "ok")
     skipped = sum(1 for r in report.rows if r["status"] == "skipped")

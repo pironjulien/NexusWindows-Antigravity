@@ -15,11 +15,12 @@ from mcp.server.mcpserver import Image, MCPServer
 from mcp.types import ToolAnnotations
 
 try:
-    from . import agent_guard, busy_indicator, journal_commun
+    from . import agent_guard, busy_indicator, journal_commun, status_file
 except ImportError:
     import agent_guard
     import busy_indicator
     import journal_commun
+    import status_file
 
 
 class WindowsOnly:
@@ -769,6 +770,8 @@ def main(argv: list[str] | None = None) -> None:
         emergency_stop.start()
         # Gestes physiques de Julien (Raw Input) : pause avant toute vraie souris/clavier, interruption s'il reprend.
         physical_input.start()
+    # État pour l'appli Nexus (~/.nexus/status/windows-antigravity.json), dans un fil : jamais de retard au démarrage.
+    status_file.record_in_background(journal_commun.VERSION)
     computer_mcp.run(transport="stdio")
 
 
