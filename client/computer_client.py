@@ -3032,6 +3032,43 @@ def _wait_window_effect(
         time.sleep(EFFECT_POLL_S)
 
 
+MENU_CLASS = "#32768"  # menu contextuel Win32 (fenêtre de premier niveau à part)
+WS_POPUP = 0x80000000
+GWL_STYLE = -16
+
+
+def context_menus(pid: int) -> set[int]:
+    """Menus contextuels visibles du processus `pid` : menu Win32 (#32768) ou fenêtre popup de premier niveau
+    (ContextMenuStrip de WinForms, menu WPF), jamais une infobulle."""
+    found: set[int] = set()
+    cls = ctypes.create_unicode_buffer(256)
+
+    def enum_cb(hwnd: int, _: int) -> bool:
+        if not user32.IsWindowVisible(hwnd) or app_pid(hwnd) != pid or not user32.GetClassNameW(hwnd, cls, 256):
+            return True
+        name = cls.value
+        popup = bool(user32.GetWindowLongW(hwnd, GWL_STYLE) & WS_POPUP) and "tooltip" not in name.lower()
+        if name == MENU_CLASS or popup:
+            found.add(int(hwnd))
+        return True
+
+    user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
+    return found
+
+
+def _wait_context_menu(hwnd: int, before: set[int], timeout: float = EFFECT_WAIT_S) -> tuple[bool | None, str]:
+    """Clic droit posté : seul un NOUVEAU menu contextuel du processus prouve l'ouverture (banc de parité du
+    26/10 : « ✓ » sans menu reçu). Sinon issue inconnue (message posté : l'absence n'est pas prouvée), jamais ✓."""
+    pid = app_pid(hwnd)
+    deadline = time.monotonic() + timeout
+    while True:
+        if context_menus(pid) - before:
+            return True, "menu contextuel ouvert (fenêtre du menu relue)"
+        if time.monotonic() >= deadline:
+            return None, "clic droit posté, aucun menu contextuel vu : vérifier l'image"
+        time.sleep(EFFECT_POLL_S)
+
+
 def _other_agent_holds_token() -> bool:
     """Vrai si un AUTRE agent tient le jeton commun (il a mis sa fenêtre devant : ne pas la lui reprendre)."""
     try:
@@ -3970,6 +4007,7 @@ def _click_element(
             r = ctrl.BoundingRectangle
             cx, cy = point or ((r.left + r.right) // 2, (r.top + r.bottom) // 2)
             before = window_fingerprint(target_hwnd, with_tree=True)
+            menus_before = context_menus(app_pid(target_hwnd))
             try:
                 win32_controls.post_click(target_hwnd, cx, cy, button.lower(), click_count)
             except win32_controls.PartialSendError:
@@ -3978,7 +4016,10 @@ def _click_element(
             pass
         else:
             # double clic / clic droit : la sélection ou le focus nés du premier clic ne prouvent rien
-            verified, how = _wait_window_effect(target_hwnd, before, structural_only=True)
+            if button.lower() == "right":
+                verified, how = _wait_context_menu(target_hwnd, menus_before)
+            else:
+                verified, how = _wait_window_effect(target_hwnd, before, structural_only=True)
             posted = {"success": _success(verified), "verified": verified, "method": "win32_post_click",
                       "technique": "clic par messages", "physical": False, **base,
                       "timing_ms": round((time.perf_counter() - t0) * 1000, 2)}  # fmt: skip
@@ -4641,7 +4682,10 @@ def _background_keys(
             return None
         finally:
             _give_back_after_simulation(top, front)
-        verified, how = _wait_window_effect(target_hwnd, before)
+        # Seul un effet de structure (titre, fenêtres, taille) prouve la touche : l'activation simulée change à elle seule
+        # le focus et l'arbre (banc de parité du 26/10 : Ctrl+K dans Electron « ✓ » trois fois sans rien reçu). Sinon :
+        # envoyé, non relu (~), comme Claude.
+        verified, how = _wait_window_effect(target_hwnd, before, structural_only=True)
         chromium_keys: dict[str, Any] = {"success": _success(verified), "verified": verified, "method": method,
                                          "technique": "touches sans activation (activation simulée)", "keys": keys,
                                          "sent": True}  # fmt: skip

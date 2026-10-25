@@ -75,3 +75,19 @@ def test_two_main_windows_of_a_process_stay_ambiguous():
         assert "2 fenêtres" in str(error)
     else:
         raise AssertionError("ambiguous target accepted")
+
+
+def test_right_click_is_proven_only_by_a_new_menu(monkeypatch):
+    """Parity bench of 26/10: a posted right click answered ✓ with no menu received."""
+    monkeypatch.setattr(computer_client, "app_pid", lambda _hwnd: 42)
+    menus = [{7}]
+    monkeypatch.setattr(computer_client, "context_menus", lambda _pid: menus[0])
+    verified, how = computer_client._wait_context_menu(1, {7}, timeout=0.05)
+    assert verified is None and "aucun menu" in how
+    menus[0] = {7, 8}
+    verified, how = computer_client._wait_context_menu(1, {7}, timeout=0.05)
+    assert verified is True
+
+
+def test_context_menus_of_a_real_window_list_is_a_set():
+    assert isinstance(computer_client.context_menus(0), set)

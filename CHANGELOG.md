@@ -9,6 +9,18 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.2.2] - 2026-10-26
+
+Two false successes from the common parity bench of 26/10.
+
+### Fixed
+- Keys and shortcuts in Chrome, Edge and Electron (sent under simulated activation): the activation alone moves the
+  focus and changes the tree, which counted as proof. Only a structural effect (title, windows, size) now proves the
+  key; otherwise the step reports sent, not read back (~). Ctrl+K in Electron answered ✓ three times with nothing
+  received.
+- Right click by posted messages (Win32, WinForms): proven only by a new context menu of the application (Win32
+  `#32768` menu, or a popup such as WinForms' ContextMenuStrip; tooltips excluded); otherwise unverified (~), never ✓.
+
 ## [3.2.1] - 2026-10-26
 
 ### Fixed
@@ -393,7 +405,8 @@ Also released with 2.7.0, the first release after 2.5.0 (changes of 2026-10-14 t
   ([chrome-computer-use](https://github.com/pironjulien/chrome-computer-use)).
 - The floating companion window and the former multi-adapter layout of 2.5.0.
 
-[Unreleased]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.1...HEAD
+[Unreleased]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.2...HEAD
+[3.2.2]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.1...v3.2.2
 [3.2.1]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.0...v3.2.1
 [3.2.0]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.7...v3.2.0
 [3.1.7]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.6...v3.1.7
