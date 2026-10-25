@@ -9,6 +9,18 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.1.6] - 2026-10-25
+
+The mouse wheel in Chromium, as the other editions do it.
+
+### Fixed
+- Wheel in Chrome, Edge and Electron: the DevTools wheel (one trusted `mouseWheel` event at the point, page proven)
+  is now tried before scrolling by line. Scrolling the next hidden line into view moved the area by 84 to 98 px and
+  answered ✓, which is not a wheel notch (the common parity bench of 25/10: 0/3 on Edge and Electron, five false
+  successes, where NexusWindows for Claude and for Codex scored 3/3 on Edge with the DevTools wheel).
+- Without DevTools, scrolling by line still happens but is reported as unverified (~), never ✓: the area moved, the
+  amount is not a notch.
+
 ## [3.1.5] - 2026-10-25
 
 Three fixes from real use in Chrome (reported by NexusWindows for Claude).
@@ -353,7 +365,8 @@ Also released with 2.7.0, the first release after 2.5.0 (changes of 2026-10-14 t
   ([chrome-computer-use](https://github.com/pironjulien/chrome-computer-use)).
 - The floating companion window and the former multi-adapter layout of 2.5.0.
 
-[Unreleased]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.5...HEAD
+[Unreleased]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.6...HEAD
+[3.1.6]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.5...v3.1.6
 [3.1.5]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.4...v3.1.5
 [3.1.4]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.3...v3.1.4
 [3.1.3]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.2...v3.1.3

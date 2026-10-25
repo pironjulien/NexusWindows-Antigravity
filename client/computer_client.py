@@ -4938,6 +4938,49 @@ def scroll(
                 result["message"] = outcome["message"]
             return result
 
+    # 1 bis bis. Chromium/Electron/Edge : molette par DevTools (recette B du banc commun, Codex, prouvée le 21/10), au
+    # point donné ou au centre de l'élément visé, seulement si le port, la page et la liaison fenêtre ↔ page sont
+    # prouvés. AVANT le défilement par ligne (banc de parité du 25/10 : la ligne amenée dans la vue n'est pas un cran,
+    # 0/3 sur Edge et Electron là où la molette DevTools de Claude et Codex fait 3/3). Refus (rien envoyé) : on
+    # continue ; envoyée : jamais une autre technique ensuite.
+    if (delta_y or delta_x) and win32_controls.family(target_hwnd) == "Chromium":
+        cdp_point: tuple[int, int] | None = None
+        if x is not None and y is not None:
+            if coords == "screen":
+                cdp_point = (int(x), int(y))
+            else:
+                rect = get_window_rect(target_hwnd)
+                cdp_point = (rect["left"] + int(x), rect["top"] + int(y))
+        elif element_index is not None:
+            crect = get_cached_element(element_index, target_hwnd).BoundingRectangle
+            cdp_point = ((crect.left + crect.right) // 2, (crect.top + crect.bottom) // 2)
+        if cdp_point is not None:
+            # Empreinte prise APRÈS la preuve par titre (titre de la fenêtre revenu), juste avant l'envoi : le nonce ne
+            # peut jamais passer pour l'effet de la molette (relecture de Codex, 21/10).
+            snapshot: dict[str, Any] = {}
+            try:
+                sent = cdp_wheel.wheel(
+                    win32_controls.root_of(target_hwnd) or target_hwnd, cdp_point[0], cdp_point[1], delta_y, delta_x,
+                    check=emergency_stop.check,
+                    before_send=lambda: snapshot.update(before=window_fingerprint(target_hwnd, with_tree=True)),
+                )  # fmt: skip
+            except cdp_wheel.NotApplicable as refusal:
+                if getattr(refusal, "title_left", False):  # rien envoyé, mais la page peut garder le titre aléatoire
+                    return {"success": False, "method": "devtools_wheel", "physical": False, "verified": None,
+                            "message": str(refusal)}  # fmt: skip
+                sent = None
+            except cdp_wheel.Uncertain as error:
+                return {"success": None, "method": "devtools_wheel", "technique": "molette DevTools", "physical": False,
+                        "verified": None, "message": str(error)}  # fmt: skip
+            if sent is not None:  # accusée par la page : partie une fois, effet relu sur l'image, jamais rejouée
+                verified, how = _wait_window_effect(target_hwnd, snapshot.get("before"))
+                result = {"success": _success(verified), "method": "devtools_wheel", "technique": sent["technique"],
+                          "physical": False, "mechanism": sent["mechanism"], "delta_y": delta_y, "delta_x": delta_x,
+                          "verified": verified, "surface": sent.get("surface")}  # fmt: skip
+                if how:
+                    result["verified_by"] = how
+                return result
+
     # 1 ter. Sans molette (recette de NexusClaude du 23/10, relue par Codex) : Tk par sa barre de défilement native collée
     # au widget sous le point ; Chromium sans DevTools par la ligne cachée suivante de la zone sous le point. Refus (rien
     # envoyé) : on continue ; envoyé : jamais une autre technique ensuite.
@@ -5019,48 +5062,7 @@ def scroll(
                     result["verified_by"] = how
                 return result
 
-    # 3. Chromium/Electron/Edge : molette par DevTools (recette B du banc commun, Codex, prouvée le 21/10), au point
-    # donné ou au centre de l'élément visé, seulement si le port, la page et la liaison fenêtre ↔ page sont prouvés.
-    # Refus (rien envoyé) : on continue vers le refus habituel ; envoyée : jamais une autre technique ensuite.
-    if (delta_y or delta_x) and win32_controls.family(target_hwnd) == "Chromium":
-        cdp_point: tuple[int, int] | None = None
-        if x is not None and y is not None:
-            if coords == "screen":
-                cdp_point = (int(x), int(y))
-            else:
-                rect = get_window_rect(target_hwnd)
-                cdp_point = (rect["left"] + int(x), rect["top"] + int(y))
-        elif element_index is not None:
-            crect = get_cached_element(element_index, target_hwnd).BoundingRectangle
-            cdp_point = ((crect.left + crect.right) // 2, (crect.top + crect.bottom) // 2)
-        if cdp_point is not None:
-            # Empreinte prise APRÈS la preuve par titre (titre de la fenêtre revenu), juste avant l'envoi : le nonce ne
-            # peut jamais passer pour l'effet de la molette (relecture de Codex, 21/10).
-            snapshot: dict[str, Any] = {}
-            try:
-                sent = cdp_wheel.wheel(
-                    win32_controls.root_of(target_hwnd) or target_hwnd, cdp_point[0], cdp_point[1], delta_y, delta_x,
-                    check=emergency_stop.check,
-                    before_send=lambda: snapshot.update(before=window_fingerprint(target_hwnd, with_tree=True)),
-                )  # fmt: skip
-            except cdp_wheel.NotApplicable as refusal:
-                if getattr(refusal, "title_left", False):  # rien envoyé, mais la page peut garder le titre aléatoire
-                    return {"success": False, "method": "devtools_wheel", "physical": False, "verified": None,
-                            "message": str(refusal)}  # fmt: skip
-                sent = None
-            except cdp_wheel.Uncertain as error:
-                return {"success": None, "method": "devtools_wheel", "technique": "molette DevTools", "physical": False,
-                        "verified": None, "message": str(error)}  # fmt: skip
-            if sent is not None:  # accusée par la page : partie une fois, effet relu sur l'image, jamais rejouée
-                verified, how = _wait_window_effect(target_hwnd, snapshot.get("before"))
-                result = {"success": _success(verified), "method": "devtools_wheel", "technique": sent["technique"],
-                          "physical": False, "mechanism": sent["mechanism"], "delta_y": delta_y, "delta_x": delta_x,
-                          "verified": verified, "surface": sent.get("surface")}  # fmt: skip
-                if how:
-                    result["verified_by"] = how
-                return result
-
-    # 4. Molette physique (repli autorisé seulement : fenêtre visée + foreground=True, jamais d'office)
+    # 3. Molette physique (repli autorisé seulement : fenêtre visée + foreground=True, jamais d'office)
     _physical_gate(
         target_hwnd,
         foreground,

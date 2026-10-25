@@ -302,6 +302,12 @@ def item_at(hwnd: int, x: int, y: int, delta_y: int, check: Callable[[], None]) 
         except Exception:  # noqa: BLE001 - relecture impossible : on réessaie jusqu'à l'échéance
             continue
         if now_line and now_box and now_line[1] - now_box[1] != before:
+            # La zone a bougé, mais d'une ligne amenée dans la vue, pas d'un cran de molette (banc de parité du 25/10 :
+            # 84 à 98 px annoncés ✓ là où un cran fait 120 px CSS) : effet réel, quantité non prouvée, jamais ✓.
             moved = before - (now_line[1] - now_box[1])
-            return {"verified": True, "message": f"ligne « {line.name[:30]} » déplacée de {moved:+d} px dans sa zone"}
+            return {
+                "verified": None,
+                "message": f"ligne « {line.name[:30]} » déplacée de {moved:+d} px dans sa zone : défilement par "
+                "ligne, pas un cran de molette (molette DevTools indisponible) ; vérifier sur l'image",
+            }
     return {"verified": None, "message": "ligne amenée dans la vue, zone non vue défiler en 1 s : vérifier l'image"}
