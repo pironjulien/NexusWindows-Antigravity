@@ -20,7 +20,7 @@ Antigravity (Gemini) see and operate Windows desktop applications while the user
 foreground window. Built for a fast model: one look, then one batch of steps with label targets, and every reply
 says what to do next.
 
-Version 3.1.3 · Windows 10/11 · Python 3.11+ · MIT licence
+Version 3.1.4 · Windows 10/11 · Python 3.11+ · MIT licence
 
 Part of the Nexus family: [NexusWindows](https://julienpiron.fr/nexuswindows/)
 ([Claude](https://github.com/pironjulien/NexusWindows-Claude) ·
@@ -55,10 +55,38 @@ bench.
 
 ## Installation
 
-Requirements: Windows 10 or 11, [uv](https://docs.astral.sh/uv/) (`winget install astral-sh.uv`).
+Requirements: Windows 10 or 11 and [Google Antigravity](https://antigravity.google/download). Nothing else to
+install by hand: the command below installs [uv](https://docs.astral.sh/uv/) (Astral's official installer), which
+brings Python 3.14 and the server from [PyPI](https://pypi.org/project/nexus-windows-antigravity/).
 
-From [PyPI](https://pypi.org/project/nexus-windows-antigravity/), no clone needed: declare the server in
-Antigravity's `mcp_config.json` (`%USERPROFILE%\.gemini\config\mcp_config.json`):
+1. Open **PowerShell** (Start menu, type `PowerShell`, Enter).
+2. Paste this line and press Enter:
+
+   ```powershell
+   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"; $env:Path = "$HOME\.local\bin;$env:Path"; uvx --python 3.14 nexus-windows-antigravity@latest install
+   ```
+
+3. Restart Antigravity. The `nexus-computer` plugin appears under **Customizations > Installed**, with its five tools
+   and the agent guide. Ask for example: *"In Notepad, behind my window, type a shopping list and save it on the
+   desktop."*
+
+What the `install` command does: it writes the `nexus-computer` plugin into
+`%USERPROFILE%\.gemini\config\plugins\nexus-computer`, the folder Antigravity loads plugins from: the agent guide
+([`SKILL.md`](https://github.com/pironjulien/NexusWindows-Antigravity/blob/main/plugins/nexus-computer/skills/nexus-computer/SKILL.md)),
+the plugin manifest, and `mcp_config.json`, which declares the server once, pinned to the installed version
+(`uvx --python 3.14 nexus-windows-antigravity==<version>`). It removes an older manual declaration of the same server
+from the global `mcp_config.json`; other servers, plugins and Antigravity settings are never touched. A plugin is
+enabled by default; if you turned it off, it says so and leaves your choice.
+
+- **Update**: run the same line again (`@latest` installs the newest version and moves the pin).
+- **Check**: `uvx --python 3.14 nexus-windows-antigravity install --check` (writes nothing).
+- **Remove**: `uvx --python 3.14 nexus-windows-antigravity uninstall`.
+
+<details>
+<summary>Without the plugin: declare the server yourself</summary>
+
+Edit `%USERPROFILE%\.gemini\config\mcp_config.json` (in the Antigravity IDE: agent panel **…** > **MCP Servers** >
+**Manage MCP Servers** > **View raw config**):
 
 ```json
 {
@@ -72,11 +100,13 @@ Antigravity's `mcp_config.json` (`%USERPROFILE%\.gemini\config\mcp_config.json`)
 }
 ```
 
-The agent guide that teaches Antigravity the five tools is
-[`SKILL.md`](https://github.com/pironjulien/NexusWindows-Antigravity/blob/main/plugins/nexus-computer/skills/nexus-computer/SKILL.md),
-shipped in the `plugins/nexus-computer` Antigravity plugin; `install.ps1` (below) installs that plugin with the server.
+The agent then has the tools but not the guide; the plugin is the recommended way.
+</details>
 
-From a clone (development), with PowerShell 7:
+<details>
+<summary>From a clone (development)</summary>
+
+With [Git](https://git-scm.com/) and [PowerShell 7](https://aka.ms/powershell):
 
 ```powershell
 git clone https://github.com/pironjulien/NexusWindows-Antigravity.git
@@ -84,13 +114,10 @@ cd NexusWindows-Antigravity
 pwsh -NoProfile -File install.ps1
 ```
 
-The Python environment, logs and screenshots then live in `%USERPROFILE%\.nexusagy` (outside the clone).
-`install.ps1` also installs the `nexus-computer` plugin into Antigravity
-(`%USERPROFILE%\.gemini\config\plugins\nexus-computer`): the agent guide, and the server declared once in the
-plugin's own `mcp_config.json` with `"command": "pwsh"`, `"args": ["-NoProfile", "-File",
-"C:/path/to/NexusWindows-Antigravity/scripts/start-computer-mcp.ps1"]`; the plugin is enabled in Antigravity's
-`config.json` (only while Antigravity is closed, otherwise it says so). Other servers and plugins are never touched.
-`verify.ps1` (or `install.ps1 -CheckOnly`) checks the environment and the plugin without changing anything.
+The Python environment, logs and screenshots then live in `%USERPROFILE%\.nexusagy` (outside the clone), and the
+plugin's `mcp_config.json` starts the server from the clone (`scripts/start-computer-mcp.ps1`). `verify.ps1` (or
+`install.ps1 -CheckOnly`) checks the environment and the plugin without changing anything.
+</details>
 
 ## Tools
 
@@ -181,7 +208,7 @@ has no background mode: it reached no effect without taking the screen.
 | `client/uia_fast.py`, `client/win32_controls.py` | One-round-trip UI Automation reads, native control messages |
 | `client/physical_input.py`, `client/agent_guard.py`, `client/emergency_stop.py` | The user's presence (Raw Input), batch guard, shared emergency stop |
 | `client/foreground_lock.py`, `client/garde_fous.py`, `client/garde-fous.json` | Shared foreground token and guard-rail policy, common to the author's desktop agents (also used by NexusWindows for Claude). Vendored in the public copy; in the author's setup they live in a sibling `commun` folder |
-| `plugins/nexus-computer/` | Antigravity plugin and the agent guide (`SKILL.md`), installed by `install.ps1` (`scripts/installer-plugin-antigravity.ps1`) |
+| `plugins/nexus-computer/` | Antigravity plugin and the agent guide (`SKILL.md`), installed by `nexus-windows-antigravity install` (`client/install_antigravity.py`) |
 | `tests/` | Unit tests (pytest) and the real desktop validation |
 
 ## Privacy
@@ -203,8 +230,8 @@ network requests of its own.
   in the same format as the other NexusWindows tools (app executable name, action, technique, outcome, duration,
   whether the foreground was used, and the first words of an error, cut before any quote, colon or bracket); never
   typed text, screen text, labels, titles or paths. The server never deletes it.
-- **Removing it**: remove the server from Antigravity's MCP settings (or the
-  `~/.gemini/config/plugins/nexus-computer` plugin), then delete `~/.nexusagy/` (and
+- **Removing it**: `uvx --python 3.14 nexus-windows-antigravity uninstall` (or remove the server from Antigravity's
+  MCP settings), then delete `~/.nexusagy/` (and
   `%LOCALAPPDATA%\NexusJournal`).
 
 Questions or concerns: open an issue on this repository.

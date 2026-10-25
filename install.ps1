@@ -1,7 +1,7 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param([switch]$CheckOnly)
 # NexusWindows for Antigravity on this PC: Python environment outside the clone (%USERPROFILE%\.nexusagy\python),
-# then the nexus-computer plugin installed and enabled in Antigravity (scripts\installer-plugin-antigravity.ps1).
+# then the nexus-computer plugin installed in Antigravity, pointed at this clone (client\install_antigravity.py).
 $ErrorActionPreference = "Stop"
 if ($CheckOnly) { & (Join-Path $PSScriptRoot "verify.ps1"); exit $LASTEXITCODE }
 if (-not $PSCmdlet.ShouldProcess("Ce PC", "Installer NexusWindows for Antigravity")) { return }
@@ -15,6 +15,7 @@ if (-not $uv) {
 }
 & $uv.Source sync --locked --all-groups --project $PSScriptRoot
 if ($LASTEXITCODE) { throw "Preparation du runtime local en echec" }
-& (Join-Path $PSScriptRoot "scripts\installer-plugin-antigravity.ps1")
+& $pythonExe -B (Join-Path $PSScriptRoot "client\launch.py") install --launcher (Join-Path $PSScriptRoot "scripts\start-computer-mcp.ps1")
+if ($LASTEXITCODE) { throw "Installation du plugin en echec" }
 & (Join-Path $PSScriptRoot "verify.ps1")
 exit $LASTEXITCODE

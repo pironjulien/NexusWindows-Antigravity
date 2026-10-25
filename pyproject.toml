@@ -1,6 +1,6 @@
 [project]
 name = "nexus-windows-antigravity"
-version = "3.1.3"
+version = "3.1.4"
 description = "NexusWindows for Antigravity: Windows computer use in the background for Google Antigravity (MCP server)."
 readme = "README.md"
 license = "MIT"
@@ -47,8 +47,12 @@ packages = ["client"]
 [tool.hatch.build.targets.wheel.sources]
 "client" = "nexus_windows_antigravity"
 
+# Plugin Antigravity (guide de l'agent, manifeste) livré dans la roue : `nexus-windows-antigravity install` le pose.
+[tool.hatch.build.targets.wheel.force-include]
+"plugins/nexus-computer" = "nexus_windows_antigravity/plugin"
+
 [tool.hatch.build.targets.sdist]
-include = ["client/", "tests/", "README.md", "LICENSE", "CHANGELOG.md", "pyproject.toml", "uv.lock", "server.json"]
+include = ["client/", "plugins/", "tests/", "README.md", "LICENSE", "CHANGELOG.md", "pyproject.toml", "uv.lock", "server.json"]
 
 [dependency-groups]
 dev = [

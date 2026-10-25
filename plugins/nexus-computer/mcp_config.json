@@ -1,12 +1,9 @@
 {
   "mcpServers": {
     "nexus-computer": {
-      "command": "pwsh",
-      "args": [
-        "-NoProfile",
-        "-File",
-        "scripts/start-computer-mcp.ps1"
-      ]
+      "command": "uvx",
+      "args": ["--python", "3.14", "nexus-windows-antigravity"],
+      "env": { "PYTHONUTF8": "1" }
     }
   }
 }

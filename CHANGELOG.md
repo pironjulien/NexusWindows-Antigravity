@@ -9,6 +9,26 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.1.4] - 2026-10-25
+
+One command to install.
+
+### Added
+- `nexus-windows-antigravity install` (from PyPI, no clone): writes the `nexus-computer` plugin into
+  `%USERPROFILE%\.gemini\config\plugins\nexus-computer`: agent guide, manifest, and the server declared once, pinned
+  to the installed version through `uvx`. `--check` checks without writing; `uninstall` removes the plugin. The
+  README's installation is now one line in PowerShell (uv's official installer, then this command), checked on a
+  blank Windows profile.
+
+### Changed
+- The installer is written in Python (`client/install_antigravity.py`) and shipped in the wheel with the plugin;
+  `install.ps1` (clone) uses it with the clone's launcher. It no longer writes Antigravity's `config.json`: a plugin
+  is enabled by default, and a plugin the user turned off is reported, not turned back on.
+- An older manual declaration of `nexus-windows-antigravity` in the global `mcp_config.json` (the README's former
+  PyPI instructions) is removed, so the tools are not listed twice.
+- `plugins/nexus-computer/mcp_config.json` declares the server through `uvx` from PyPI; the plugin description is in
+  English.
+
 ## [3.1.3] - 2026-10-25
 
 The plugin installs itself.
@@ -316,7 +336,8 @@ Also released with 2.7.0, the first release after 2.5.0 (changes of 2026-10-14 t
   ([chrome-computer-use](https://github.com/pironjulien/chrome-computer-use)).
 - The floating companion window and the former multi-adapter layout of 2.5.0.
 
-[Unreleased]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.3...HEAD
+[Unreleased]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.4...HEAD
+[3.1.4]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.3...v3.1.4
 [3.1.3]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.2...v3.1.3
 [3.1.2]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.1...v3.1.2
 [3.1.1]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.0...v3.1.1
