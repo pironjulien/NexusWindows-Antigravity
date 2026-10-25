@@ -9,6 +9,12 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.2.1] - 2026-10-26
+
+### Fixed
+- State file: right after a release, PyPI's cached answer can still give the previous version; `latest` is now never
+  older than the running version (3.2.0 recorded 3.1.7 as latest, and kept it for a day).
+
 ## [3.2.0] - 2026-10-26
 
 Updates itself at each Antigravity start.
@@ -387,7 +393,8 @@ Also released with 2.7.0, the first release after 2.5.0 (changes of 2026-10-14 t
   ([chrome-computer-use](https://github.com/pironjulien/chrome-computer-use)).
 - The floating companion window and the former multi-adapter layout of 2.5.0.
 
-[Unreleased]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.0...HEAD
+[Unreleased]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.1...HEAD
+[3.2.1]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.0...v3.2.1
 [3.2.0]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.7...v3.2.0
 [3.1.7]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.6...v3.1.7
 [3.1.6]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.5...v3.1.6

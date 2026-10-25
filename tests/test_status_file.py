@@ -34,6 +34,12 @@ def test_state_is_written_with_the_latest_version_checked_once_a_day(tmp_path, m
     assert len(calls) == 2 and later["message"] == "Up to date."
 
 
+def test_stale_pypi_answer_right_after_a_release_is_not_kept(tmp_path, monkeypatch):
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    data = status_file.record("3.2.0", fetch=lambda: "3.1.7", now=lambda: NOW)
+    assert data["latest"] == "3.2.0" and data["message"] == "Up to date."
+
+
 def test_network_failure_is_reported_not_raised(tmp_path, monkeypatch):
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
 

@@ -86,6 +86,10 @@ def record(version: str, fetch=fetch_latest, now=_now) -> dict[str, Any]:
         try:
             latest = fetch()
             checked = now().isoformat().replace("+00:00", "Z")
+            # Juste après une sortie, le JSON de PyPI (en cache) peut encore donner la version d'avant : la dernière
+            # version publiée n'est jamais plus ancienne que celle qui tourne (relevé le 26/10 : 3.1.7 lu par la 3.2.0).
+            if _key(latest) < _key(version):
+                latest = version
         except Exception as error:  # noqa: BLE001 - réseau absent, PyPI indisponible : l'état le dit
             state, message = "failed", f"Latest version not checked ({type(error).__name__})."
     data = {
