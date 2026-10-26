@@ -1,5 +1,5 @@
 {
   "name": "nexus-computer",
-  "version": "3.2.5",
+  "version": "3.2.6",
   "description": "NexusWindows for Antigravity: Windows computer use in the background (UI Automation, Win32 messages), real mouse and keyboard only as a fallback, every action read back, confirmation only to pay, send or publish."
 }

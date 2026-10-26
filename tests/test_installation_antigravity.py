@@ -130,3 +130,31 @@ def test_uninstall_removes_the_plugin_only(tmp_path, launcher):
     run(profile, "uninstall")
     assert not (profile / ".gemini/config/plugins/nexus-computer").exists()
     assert other.exists()
+
+
+def test_guide_option_installs_another_agent_guide_and_check_follows_it(tmp_path, launcher):
+    """A private clone keeps its own translation of the agent guide (install.ps1 passes --guide): it replaces the
+    shipped English guide, and --check compares against it."""
+    profile = tmp_path / "pc"
+    guide = tmp_path / "SKILL.fr.md"
+    guide.write_text("---\nname: nexus-computer\n---\n# Guide\n", encoding="utf-8")
+    run(profile, "install", "--launcher", str(launcher), "--guide", str(guide))
+    skill = profile / ".gemini/config/plugins/nexus-computer" / SKILL
+    assert skill.read_bytes() == guide.read_bytes()
+    run(profile, "install", "--check", "--launcher", str(launcher), "--guide", str(guide))
+    assert run(profile, "install", "--check", "--launcher", str(launcher), check=False).returncode == 1
+
+
+def test_public_guide_is_english_and_private_translation_matches_it():
+    """The shipped guide is the public, English one (no first name); the private French copy, when present, keeps the
+    same version and the same sections."""
+    public = (PLUGIN_SOURCE / SKILL).read_text(encoding="utf-8")
+    assert "Julien" not in public and "the user" in public
+    private_file = ROOT / "guide/SKILL.fr.md"  # absent from the public copy
+    if not private_file.exists():
+        return
+    private = private_file.read_text(encoding="utf-8")
+    version = json.loads((PLUGIN_SOURCE / "plugin.json").read_text(encoding="utf-8"))["version"]
+    assert f"(v{version})" in public and f"(v{version})" in private
+    heading = [line for line in public.splitlines() if line.startswith("#")]
+    assert len(heading) == len([line for line in private.splitlines() if line.startswith("#")])

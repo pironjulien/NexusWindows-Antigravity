@@ -9,7 +9,8 @@ Antigravity déjà ouvert dont le PATH est ancien), ou, depuis un clone (`instal
 `config.json` ne garde qu'un choix explicite de l'utilisateur) : `config.json` n'est jamais écrit, un plugin que
 l'utilisateur a désactivé est seulement signalé. Les anciennes déclarations en double (entrée du `mcp_config.json`
 global, copie globale `skills/nexus-computer`) sont retirées ; les autres serveurs, plugins et clés restent intacts.
-`--check` contrôle sans rien écrire ; `uninstall` retire le plugin."""
+`--check` contrôle sans rien écrire ; `uninstall` retire le plugin. `--guide` (clone privé de Julien) installe son guide en
+français (`guide/SKILL.fr.md`, non exporté) à la place du guide public anglais."""
 
 from __future__ import annotations
 
@@ -95,7 +96,7 @@ class Installer:
         path.unlink()
         self.changes += 1
 
-    def install(self, launcher: Path | None) -> None:
+    def install(self, launcher: Path | None, guide: Path | None = None) -> None:
         source = plugin_source()
         # 1. Fichiers du plugin, copiés octet pour octet ; ceux que la version livrée n'a plus sont retirés.
         shipped = set()
@@ -104,7 +105,8 @@ class Installer:
             if not file.is_file() or relative.name == "mcp_config.json" or "__pycache__" in relative.parts:
                 continue
             shipped.add(relative)
-            self.write(self.target / relative, file.read_bytes())
+            data = guide.read_bytes() if guide is not None and relative == Path(GUIDE) else file.read_bytes()
+            self.write(self.target / relative, data)
         # Un fichier illisible (chemin de plus de 260 caractères sans les chemins longs de Windows) manquerait sans
         # bruit : le plugin sans son guide n'est pas installé.
         missing = {Path("plugin.json"), Path(GUIDE)} - shipped
@@ -155,6 +157,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("action", choices=["install", "uninstall"])
     parser.add_argument("--check", action="store_true", help="check the installation without writing anything")
     parser.add_argument("--launcher", type=Path, help="development clone: start the server with this PowerShell script")
+    parser.add_argument(
+        "--guide", type=Path, help="development clone: install this agent guide instead of the shipped one"
+    )
     args = parser.parse_args(argv)
     installer = Installer(check=args.check)
     if args.action == "uninstall":
@@ -163,7 +168,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"NexusWindows for Antigravity: plugin removed from {installer.target}. Restart Antigravity.")
         return 0
     try:
-        installer.install(args.launcher.resolve() if args.launcher else None)
+        installer.install(
+            args.launcher.resolve() if args.launcher else None, args.guide.resolve() if args.guide else None
+        )
     except Drift as drift:
         print(f"NexusWindows for Antigravity: {drift}. Run the install command again.", file=sys.stderr)
         return 1

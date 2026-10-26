@@ -15,7 +15,7 @@ if (-not $uv) {
 }
 & $uv.Source sync --locked --all-groups --project $PSScriptRoot
 if ($LASTEXITCODE) { throw "Preparation du runtime local en echec" }
-& $pythonExe -B (Join-Path $PSScriptRoot "client\launch.py") install --launcher (Join-Path $PSScriptRoot "scripts\start-computer-mcp.ps1")
+& $pythonExe -B (Join-Path $PSScriptRoot "client\launch.py") install --launcher (Join-Path $PSScriptRoot "scripts\start-computer-mcp.ps1") @guide
 if ($LASTEXITCODE) { throw "Installation du plugin en echec" }
 & (Join-Path $PSScriptRoot "verify.ps1")
 exit $LASTEXITCODE
