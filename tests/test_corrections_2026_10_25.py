@@ -123,3 +123,13 @@ def test_a_label_missing_from_the_window_is_looked_for_in_the_open_menus(monkeyp
     monkeypatch.setattr(computer_client, "_resolve_step_target", resolve)
     assert computer_client._resolve_in_open_menus({"target": "Copier"}, 1) == (20, 3, None)
     assert computer_client._resolve_in_open_menus({"target": [1, 2, 3, 4]}, 1) is None
+
+
+def test_a_changed_control_text_proves_an_effect_but_not_a_chromium_key():
+    """26/10: a WinForms status label with a fixed accessible name changed its text, unseen by the UIA tree; the
+    action answered ~ although the app received it. A changed native control text now proves the effect."""
+    before = {"title": "Labo", "windows": (1,), "image": None, "rect": (0, 0, 10, 10), "controls": "a"}
+    after = dict(before, controls="b")
+    assert computer_client._fingerprint_changed(before, after) == "texte d'un contrôle"
+    assert "texte d'un contrôle" not in computer_client.STRUCTURAL  # simulated-activation keys stay structural only
+    assert computer_client._fingerprint_changed(before, dict(before, controls=None)) == ""

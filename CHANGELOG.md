@@ -9,6 +9,15 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.2.5] - 2026-10-26
+
+### Fixed
+- Win32 and WinForms: an action whose only visible effect is a control's text (a status label whose accessible name
+  stays fixed) answered "unverified" (~) although the application received it. The window fingerprint now also
+  compares the native controls' texts (hashed, never returned): a changed text proves the effect. Checked on the
+  common bench's WinForms lab: button, menu and Ctrl+K now answer ✓, each received by the application. Keys sent to
+  Chromium under simulated activation stay proven by structure only.
+
 ## [3.2.4] - 2026-10-26
 
 ### Fixed
@@ -420,7 +429,8 @@ Also released with 2.7.0, the first release after 2.5.0 (changes of 2026-10-14 t
   ([chrome-computer-use](https://github.com/pironjulien/chrome-computer-use)).
 - The floating companion window and the former multi-adapter layout of 2.5.0.
 
-[Unreleased]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.4...HEAD
+[Unreleased]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.5...HEAD
+[3.2.5]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.4...v3.2.5
 [3.2.4]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.3...v3.2.4
 [3.2.3]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.2...v3.2.3
 [3.2.2]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.1...v3.2.2

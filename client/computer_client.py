@@ -2944,6 +2944,25 @@ def _tree_digest(hwnd: int) -> str | None:
     return hashlib.blake2b(repr(parts).encode("utf-8", "replace"), digest_size=16).hexdigest()
 
 
+CONTROL_TEXTS_MAX = 200  # contrôles natifs relus au plus pour l'empreinte de leurs textes
+CONTROL_TEXTS_BUDGET_S = 0.3
+
+
+def _control_texts_digest(hwnd: int) -> str | None:
+    """Empreinte des textes Win32 (WM_GETTEXT) des contrôles natifs d'une fenêtre Win32/WinForms : une étiquette d'état
+    dont le nom d'accessibilité est fixe (AccessibleName) change de texte sans que l'arbre UIA le montre (banc agy du
+    26/10 : bouton, menu, Ctrl+K reçus par le labo WinForms, répondus ~). Jamais rendus : seulement hachés."""
+    if win32_controls.family(hwnd) not in win32_controls.NATIVE_FAMILIES:
+        return None
+    deadline = time.monotonic() + CONTROL_TEXTS_BUDGET_S
+    parts = []
+    for child in win32_controls.child_windows(hwnd)[:CONTROL_TEXTS_MAX]:
+        if time.monotonic() >= deadline:
+            return None  # lecture incomplète : rien n'est comparé
+        parts.append((child, win32_controls.get_text(child, timeout_ms=50)))
+    return hashlib.blake2b(repr(parts).encode("utf-8", "replace"), digest_size=16).hexdigest()
+
+
 def window_fingerprint(hwnd: int, with_tree: bool = False) -> dict[str, Any] | None:
     """Empreinte d'une fenêtre : titre, fenêtres de son processus, image en niveaux de gris (PrintWindow, sans la
     mettre devant), et au besoin l'empreinte de son arbre UIA (relue une fois, à l'échéance). None si la fenêtre
@@ -2963,6 +2982,7 @@ def window_fingerprint(hwnd: int, with_tree: bool = False) -> dict[str, Any] | N
         "windows": _process_windows(app_pid(hwnd)),
         "image": image,
         "rect": (rect["left"], rect["top"], rect["width"], rect["height"]),
+        "controls": _control_texts_digest(hwnd),
     }
     if with_tree:
         out["tree"] = _tree_digest(hwnd)
@@ -2983,6 +3003,8 @@ def _fingerprint_changed(before: dict[str, Any] | None, after: dict[str, Any] | 
     # tailles différentes d'une fenêtre recouverte ont validé un clic que le labo n'avait pas reçu).
     if before.get("rect") is not None and after.get("rect") is not None and before["rect"] != after["rect"]:
         return "taille de la fenêtre"
+    if before.get("controls") and after.get("controls") and before["controls"] != after["controls"]:
+        return "texte d'un contrôle"
     a, b = before.get("image"), after.get("image")
     if a is not None and b is not None:
         if a.size != b.size:
