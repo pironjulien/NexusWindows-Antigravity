@@ -9,6 +9,21 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.2.7] - 2026-10-26
+
+### Fixed
+- Opening a document whose default application comes from the Microsoft Store (an MP4 in Media Player): the
+  association has no executable and the window is titled after the application, so the opening always answered
+  "unverified" (~), and the shell, started without the foreground, could open nothing at all. The document is now
+  handed to the application with `IApplicationActivationManager::ActivateForFile` (its process id is returned), the
+  window is recognised by that process tree (UWP frame included), and an instance already open counts only when its
+  UI Automation tree shows the document's name. Applications without the file contract (Photos, Notepad) still go
+  through the shell. Checked on a real PC: cold start 1.5 s, player already open 2.8 s, foreground given back.
+
+### Added
+- Plugin manifest for the Antigravity marketplace: `$schema`, display name, logo, three suggested prompts, author,
+  homepage, repository, licence and keywords (all keys of Antigravity's `plugin.json` schema).
+
 ## [3.2.6] - 2026-10-26
 
 ### Changed
@@ -436,7 +451,8 @@ Also released with 2.7.0, the first release after 2.5.0 (changes of 2026-10-14 t
   ([chrome-computer-use](https://github.com/pironjulien/chrome-computer-use)).
 - The floating companion window and the former multi-adapter layout of 2.5.0.
 
-[Unreleased]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.6...HEAD
+[Unreleased]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.7...HEAD
+[3.2.7]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.6...v3.2.7
 [3.2.6]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.5...v3.2.6
 [3.2.5]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.4...v3.2.5
 [3.2.4]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.3...v3.2.4

@@ -1,5 +1,18 @@
 {
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
   "name": "nexus-computer",
-  "version": "3.2.6",
-  "description": "NexusWindows for Antigravity: Windows computer use in the background (UI Automation, Win32 messages), real mouse and keyboard only as a fallback, every action read back, confirmation only to pay, send or publish."
+  "displayName": "NexusWindows for Antigravity",
+  "version": "3.2.7",
+  "description": "NexusWindows for Antigravity: Windows computer use in the background (UI Automation, Win32 messages), real mouse and keyboard only as a fallback, every action read back, confirmation only to pay, send or publish.",
+  "logo": "logo.png",
+  "suggestedPrompts": [
+    "In Notepad, behind my window, type a shopping list and save it on the Desktop.",
+    "Open Calculator and compute 1234 × 5678 without taking my mouse.",
+    "List my open windows, then read the text of the Notepad window behind this one."
+  ],
+  "author": { "name": "Julien Piron", "url": "https://julienpiron.fr" },
+  "homepage": "https://github.com/pironjulien/NexusWindows-Antigravity#readme",
+  "repository": "https://github.com/pironjulien/NexusWindows-Antigravity",
+  "license": "MIT",
+  "keywords": ["windows", "computer-use", "desktop", "ui-automation", "mcp", "background"]
 }

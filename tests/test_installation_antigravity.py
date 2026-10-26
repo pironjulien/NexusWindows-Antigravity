@@ -158,3 +158,27 @@ def test_public_guide_is_english_and_private_translation_matches_it():
     assert f"(v{version})" in public and f"(v{version})" in private
     heading = [line for line in public.splitlines() if line.startswith("#")]
     assert len(heading) == len([line for line in private.splitlines() if line.startswith("#")])
+
+
+def test_manifest_uses_only_keys_of_antigravity_plugin_schema():
+    """plugin.json follows https://antigravity.google/schemas/v1/plugin.json (additionalProperties false): known keys
+    only, at most three suggested prompts, a logo file inside the plugin (marketplace listing)."""
+    manifest = read_json(PLUGIN_SOURCE / "plugin.json")
+    allowed = {
+        "$schema",
+        "name",
+        "displayName",
+        "description",
+        "version",
+        "logo",
+        "suggestedPrompts",
+        "author",
+        "homepage",
+        "repository",
+        "license",
+        "keywords",
+    }
+    assert set(manifest) <= allowed
+    assert manifest["$schema"] == "https://antigravity.google/schemas/v1/plugin.json"
+    assert 1 <= len(manifest["suggestedPrompts"]) <= 3
+    assert (PLUGIN_SOURCE / manifest["logo"]).is_file()

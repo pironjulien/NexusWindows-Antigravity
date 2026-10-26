@@ -1882,6 +1882,189 @@ def _title_names_file(title: Any, file_name: str) -> bool:
     return False
 
 
+# Document d'une application Store (Lecteur multimédia…) : son association n'a pas d'exécutable, et son cadre
+# (ApplicationFrameHost) porte le nom de l'application, pas celui du document. Portage du correctif de NexusWindows
+# pour Claude 3.3.1 (26/10) : AUMID de l'association, ActivateForFile (pid rendu), fenêtre reconnue par l'arbre du pid,
+# nom du document lu dans son arbre UI Automation.
+ASSOCSTR_APPID = 21
+DOCUMENT_REUSED_AFTER_S = 1.5  # instance déjà ouverte qui prend le document : sa fenêtre n'est pas nouvelle
+_APP_ACTIVATION: list[Any] = []
+
+
+def _packaged_handler(path: str) -> str:
+    """AppUserModelID (« Paquet_éditeur!App ») de l'application Store qui ouvre ce document ; « » pour un programme
+    classique, un dossier ou un type inconnu."""
+    target = Path(path)
+    if target.is_dir() or not target.suffix:
+        return ""
+    try:
+        query = ctypes.windll.shlwapi.AssocQueryStringW
+        size = wintypes.DWORD(1024)
+        buf = ctypes.create_unicode_buffer(size.value)
+        if query(ASSOCF_INIT_IGNOREUNKNOWN, ASSOCSTR_APPID, target.suffix, None, buf, ctypes.byref(size)) != 0:
+            return ""
+    except (OSError, AttributeError):
+        return ""
+    return buf.value if "!" in buf.value else ""
+
+
+def _activation_manager() -> Any:
+    """IApplicationActivationManager (comtypes), défini à la première ouverture d'un document Store."""
+    import comtypes
+    import comtypes.client
+
+    if not _APP_ACTIVATION:
+
+        class IApplicationActivationManager(comtypes.IUnknown):
+            _iid_ = comtypes.GUID("{2e941141-7f97-4756-ba1d-9decde894a3d}")
+            _methods_ = [
+                comtypes.COMMETHOD(
+                    [], comtypes.HRESULT, "ActivateApplication",
+                    (["in"], ctypes.c_wchar_p, "appUserModelId"), (["in"], ctypes.c_wchar_p, "arguments"),
+                    (["in"], ctypes.c_ulong, "options"), (["out"], ctypes.POINTER(ctypes.c_ulong), "processId"),
+                ),
+                comtypes.COMMETHOD(
+                    [], comtypes.HRESULT, "ActivateForFile",
+                    (["in"], ctypes.c_wchar_p, "appUserModelId"), (["in"], ctypes.c_void_p, "itemArray"),
+                    (["in"], ctypes.c_wchar_p, "verb"), (["out"], ctypes.POINTER(ctypes.c_ulong), "processId"),
+                ),
+            ]  # fmt: skip
+
+        _APP_ACTIVATION.append(IApplicationActivationManager)
+    return comtypes.client.CreateObject(
+        comtypes.GUID("{45BA127D-10A8-46EA-8AB7-56EA9078943C}"), interface=_APP_ACTIVATION[0]
+    )
+
+
+def _activate_for_file(app_id: str, path: str) -> int:
+    """IApplicationActivationManager::ActivateForFile → pid de l'application Store qui ouvre le document (celui de
+    l'instance déjà ouverte si elle le prend). Erreur si l'application n'a pas le contrat d'ouverture de fichiers
+    (Photos, Bloc-notes : 0x80270254) : os.startfile prend alors le relais."""
+    import comtypes
+
+    shell32 = ctypes.windll.shell32
+    out = ctypes.POINTER(ctypes.POINTER(comtypes.IUnknown))
+    shell32.SHCreateItemFromParsingName.argtypes = [
+        ctypes.c_wchar_p,
+        ctypes.c_void_p,
+        ctypes.POINTER(comtypes.GUID),
+        out,
+    ]
+    shell32.SHCreateItemFromParsingName.restype = ctypes.c_long
+    shell32.SHCreateShellItemArrayFromShellItem.argtypes = [
+        ctypes.POINTER(comtypes.IUnknown), ctypes.POINTER(comtypes.GUID), out
+    ]  # fmt: skip
+    shell32.SHCreateShellItemArrayFromShellItem.restype = ctypes.c_long
+    item, items = ctypes.POINTER(comtypes.IUnknown)(), ctypes.POINTER(comtypes.IUnknown)()
+    iid_item = comtypes.GUID("{43826d1e-e718-42ee-bc55-a1e261c37bfe}")
+    iid_array = comtypes.GUID("{b63ea76d-1f85-456f-a19c-48159efa858b}")
+    hr = shell32.SHCreateItemFromParsingName(path, None, ctypes.byref(iid_item), ctypes.byref(item))
+    if hr or not item:
+        raise OSError(f"élément du shell introuvable ({hr & 0xFFFFFFFF:#x})")
+    hr = shell32.SHCreateShellItemArrayFromShellItem(item, ctypes.byref(iid_array), ctypes.byref(items))
+    if hr or not items:
+        raise OSError(f"tableau d'éléments du shell impossible ({hr & 0xFFFFFFFF:#x})")
+    return int(_activation_manager().ActivateForFile(app_id, ctypes.cast(items, ctypes.c_void_p), None))
+
+
+class PROCESSENTRY32W(ctypes.Structure):
+    _fields_ = [
+        ("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD), ("th32ProcessID", wintypes.DWORD),
+        ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
+        ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", ctypes.c_long), ("dwFlags", wintypes.DWORD),
+        ("szExeFile", ctypes.c_wchar * 260),
+    ]  # fmt: skip
+
+
+def _process_tree(pid: int) -> set[int]:
+    """pid et tous ses descendants (instantané Toolhelp)."""
+    k32 = ctypes.windll.kernel32
+    k32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    k32.Process32FirstW.argtypes = k32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+    children: dict[int, list[int]] = {}
+    snap = k32.CreateToolhelp32Snapshot(0x2, 0)  # TH32CS_SNAPPROCESS
+    if not snap or snap == wintypes.HANDLE(-1).value:
+        return {pid}
+    try:
+        entry = PROCESSENTRY32W()
+        entry.dwSize = ctypes.sizeof(entry)
+        ok = k32.Process32FirstW(snap, ctypes.byref(entry))
+        while ok:
+            children.setdefault(entry.th32ParentProcessID, []).append(entry.th32ProcessID)
+            ok = k32.Process32NextW(snap, ctypes.byref(entry))
+    finally:
+        k32.CloseHandle(snap)
+    tree, todo = {pid}, [pid]
+    while todo:
+        for child in children.get(todo.pop(), []):
+            if child not in tree:
+                tree.add(child)
+                todo.append(child)
+    return tree
+
+
+def _core_window_titles(pids: set[int]) -> set[str]:
+    """Titres des CoreWindow (même masquées, de premier niveau) des processus donnés : un cadre UWP qui porte l'un
+    d'eux héberge l'application (à froid, la CoreWindow n'est pas toujours enfant du cadre)."""
+    titles: set[str] = set()
+
+    def visit(hwnd: int, _: int) -> bool:
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value in pids:
+            cls = ctypes.create_unicode_buffer(64)
+            user32.GetClassNameW(hwnd, cls, 64)
+            if cls.value == "Windows.UI.Core.CoreWindow":
+                length = user32.GetWindowTextLengthW(hwnd)
+                buf = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(hwnd, buf, length + 1)
+                if buf.value:
+                    titles.add(buf.value)
+        return True
+
+    user32.EnumWindows(WNDENUMPROC(visit), 0)
+    return titles
+
+
+def _shows_document(hwnd: int, file_name: str) -> bool:
+    """Le titre ou un élément de l'arbre UI Automation porte le nom du fichier (une application Store titre son cadre
+    à son nom, « Lecteur multimédia » : le document est dans le contenu)."""
+    if uia is None:
+        return False
+    names = {_plain(file_name), _plain(Path(file_name).stem)} - {""}
+    try:
+        root = uia.ControlFromHandle(hwnd)
+        if root is None:
+            return False
+        for count, (node, _depth) in enumerate(uia.WalkControl(root, includeTop=True, maxDepth=12)):
+            if count > 600:
+                break
+            if any(n in _plain(node.Name) for n in names):
+                return True
+    except Exception:  # noqa: BLE001 - arbre illisible : rien de prouvé
+        return False
+    return False
+
+
+def _store_document_window(
+    windows: list[dict[str, Any]], pid: int, before: set[int], file_name: str, waited_s: float
+) -> tuple[dict[str, Any] | None, str]:
+    """Fenêtre de l'application Store activée pour ce document : nouvelle fenêtre de l'arbre du pid (cadre UWP
+    compris), ou, après DOCUMENT_REUSED_AFTER_S, fenêtre déjà ouverte de l'application dont l'arbre montre le document
+    (instance réutilisée)."""
+    pids = _process_tree(pid)
+    frames = _core_window_titles(pids)
+    mine = [w for w in windows if w.get("process_id") in pids or str(w.get("title") or "") in frames]
+    for w in mine:
+        if w["hwnd"] not in before:
+            return w, "nouvelle fenêtre de l'application Store activée pour ce document"
+    if waited_s >= DOCUMENT_REUSED_AFTER_S:
+        for w in mine:
+            if _shows_document(int(w["hwnd"]), file_name):
+                return w, "fenêtre de l'application Store montrant le document (instance déjà ouverte)"
+    return None, ""
+
+
 # Application Chromium/Electron lancée recouverte (recette commune, NexusWindows/commun/benchmarks/windows/RECETTES.md, 24/10) : sans ces
 # commutateurs, Chromium ne dessine ni ne publie à l'accessibilité une fenêtre recouverte dès son démarrage (Logi
 # Options+ resté sur son écran de démarrage violet derrière Claude agrandi ; banc « lancement recouvert » : bouton
@@ -2034,13 +2217,21 @@ def open_path(path_or_url: str) -> dict[str, Any]:
     )
     before = {w["hwnd"] for w in list_windows(visible_only=True)}
     front_before = int(user32.GetForegroundWindow() or 0)
+    store_app = "" if chromium or app else _packaged_handler(path_expanded)
+    store_pid = 0
     if chromium:
         _start_chromium(chromium)
+    elif store_app:
+        try:  # ShellExecute d'un document Store lancé sans premier plan peut ne rien ouvrir (constat Claude, 26/10)
+            store_pid = _activate_for_file(store_app, path_expanded)
+        except Exception:  # noqa: BLE001 - pas de contrat d'ouverture de fichiers : le shell prend le relais
+            os.startfile(path_expanded)
     else:
         os.startfile(path_expanded)
     seen: dict[str, Any] | None = None
     verified_by = ""
-    deadline = time.monotonic() + OPEN_WAIT_S
+    start = time.monotonic()
+    deadline = start + OPEN_WAIT_S
     while seen is None and time.monotonic() < deadline:
         time.sleep(0.15)
         windows = list_windows(visible_only=True)
@@ -2055,17 +2246,21 @@ def open_path(path_or_url: str) -> dict[str, Any]:
                 if w["hwnd"] in before and of_app and _title_names_file(w.get("title"), target.name):
                     seen, verified_by = w, "fenêtre de l'application associée portant le nom (onglet)"
                     break
+        if seen is None and store_pid:  # 3. application Store : arbre du pid activé, nom du document lu dans l'arbre
+            seen, verified_by = _store_document_window(
+                windows, store_pid, before, target.name, time.monotonic() - start
+            )
     stolen = _give_back_after_open(seen, front_before)
     result: dict[str, Any] = {"success": True if seen else None, "verified": bool(seen) or None, "path": path_expanded}
-    if app:
-        result["application"] = app
+    if app or store_app:
+        result["application"] = app or store_app
     if chromium:
         result["chromium"] = "dessinée et lisible même recouverte (suivi d'occlusion coupé, accessibilité forcée)"
     if seen:
         result.update(hwnd=seen["hwnd"], title=seen["title"], verified_by=verified_by)
     else:
         result["message"] = (
-            f"~ ouverture non vérifiée : aucune fenêtre de {app or 'l’application associée'} portant le nom relue en "
+            f"~ ouverture non vérifiée : aucune fenêtre de {app or store_app or 'l’application associée'} portant le nom relue en "
             f"{OPEN_WAIT_S:g} s ; aucune fenêtre désignée, vérifier (windows)."
         )
     if stolen:
