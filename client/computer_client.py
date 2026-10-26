@@ -6143,6 +6143,31 @@ def _combo_of_edit(idx: int) -> int | None:
     return next((i for i, info in _element_info.items() if info.get("tree_index") == parent), None)
 
 
+class TargetNotFoundError(ValueError):
+    """Libellé absent de l'arbre de la fenêtre visée."""
+
+
+def _resolve_in_open_menus(s: dict[str, Any], target_hwnd: int):
+    """Libellé absent de la fenêtre : cherché dans les menus ouverts du même processus (menu contextuel WinForms,
+    menu Win32 #32768, liste déroulante WPF), fenêtres de premier niveau à part de la fenêtre visée (banc de parité du
+    26/10 : « Copier » du menu contextuel introuvable après un clic droit réussi). Rend (fenêtre du menu, index, box_2d)
+    ou None ; jamais une autre application."""
+    if not isinstance(s.get("target"), str):
+        return None
+    for menu in sorted(context_menus(app_pid(target_hwnd))):
+        if menu == target_hwnd:
+            continue
+        trial = dict(s)
+        try:
+            element_index, box_2d = _resolve_step_target(trial, menu)
+        except TargetNotFoundError:
+            continue
+        if trial.get("_target_note"):
+            s["_target_note"] = trial["_target_note"]
+        return menu, element_index, box_2d
+    return None
+
+
 def _resolve_step_target(
     s: dict[str, Any], target_hwnd: int
 ) -> tuple[int | None, list[int] | tuple[int, int, int, int] | None]:
@@ -6192,7 +6217,7 @@ def _resolve_step_target(
                     elif s.get("box_2d") is not None:
                         s["_target_note"] = f"libellé '{target}' absent de l'arbre UIA, repli visuel sur box_2d"
                     else:
-                        raise ValueError(f"Élément cible '{target}' introuvable dans la fenêtre.")
+                        raise TargetNotFoundError(f"Élément cible '{target}' introuvable dans la fenêtre.")
                 else:
                     element_index = found
                     if note:
@@ -6292,7 +6317,14 @@ def _run_act_step(
         )
     if action in ("wait", "sleep"):
         return _wait_step(s, target_hwnd)
-    element_index, box_2d = _resolve_step_target(s, target_hwnd)
+    try:
+        element_index, box_2d = _resolve_step_target(s, target_hwnd)
+    except TargetNotFoundError:
+        in_menu = _resolve_in_open_menus(s, target_hwnd)
+        if in_menu is None:
+            raise
+        target_hwnd, element_index, box_2d = in_menu
+        s["_target_note"] = ((s.get("_target_note") or "") + " (dans le menu ouvert de l'application)").strip()
     x = s.get("x")
     y = s.get("y")
     coords = s.get("coords", "auto")

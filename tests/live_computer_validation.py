@@ -26,11 +26,8 @@ import argparse
 import base64
 import ctypes
 import json
-import os
-import subprocess
 import sys
 import tempfile
-import threading
 import time
 from ctypes import wintypes
 from pathlib import Path
@@ -39,7 +36,6 @@ from typing import Any
 sys.dont_write_bytecode = True
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PHYSICAL_IDLE_S = 120.0
-CREATE_NO_WINDOW = 0x08000000
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -290,97 +286,6 @@ $form.Show()
 # =============================================================================
 # Validation
 # =============================================================================
-class Fixture:
-    """Fenêtre de test dans son processus ; inscrite au garde de présence commun (desktop_fixtures.LIVE)."""
-
-    def __init__(self, name: str, args: list[str], stdin: str | None = None):
-        import desktop_fixtures as df
-
-        if df.ABORT.is_set():
-            raise df.JulienActive("Julien est revenu : aucune nouvelle fenêtre de test.")
-        self.name = name
-        self.proc = subprocess.Popen(
-            args,
-            stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            creationflags=CREATE_NO_WINDOW,
-            text=True,
-            encoding="utf-8",
-        )
-        if stdin is not None:
-            assert self.proc.stdin is not None
-            self.proc.stdin.write(stdin)
-            self.proc.stdin.close()
-        self.hwnd = 0
-        line: list[str] = []
-        stdout = self.proc.stdout
-        assert stdout is not None
-        reader = threading.Thread(target=lambda: line.append(stdout.readline()), daemon=True)
-        reader.start()
-        reader.join(timeout=45)
-        text = (line[0] if line else "").strip()
-        if not text.isdigit():
-            err = ""
-            if self.proc.poll() is not None:
-                err = (self.proc.stderr.read() if self.proc.stderr else "")[-800:]
-            self.close()
-            raise RuntimeError(f"Fenêtre de test {name} non créée : {text or 'aucune sortie'} {err}".strip())
-        self.hwnd = int(text)
-        df.LIVE.add(self)
-        if df.ABORT.is_set():
-            self.close()
-            raise df.JulienActive("Julien est revenu : fenêtre de test fermée aussitôt.")
-
-    @property
-    def pid(self) -> int:
-        return self.proc.pid
-
-    def close(self) -> None:
-        import desktop_fixtures as df
-
-        df.LIVE.discard(self)
-        if self.hwnd and user32.IsWindow(self.hwnd):
-            user32.PostMessageW(self.hwnd, WM_CLOSE, 0, 0)
-        try:
-            self.proc.wait(timeout=8)
-        except subprocess.TimeoutExpired:
-            self.proc.kill()
-            self.proc.wait(timeout=5)
-
-
-def _window_pid(hwnd: int) -> int:
-    pid = wintypes.DWORD()
-    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-    return pid.value
-
-
-class ForegroundWatch:
-    """Échantillonne le premier plan toutes les 5 ms : la fenêtre de test ou ce processus ne doivent jamais l'avoir."""
-
-    def __init__(self) -> None:
-        self.forbidden: set[int] = {os.getpid()}
-        self.hits: list[tuple[float, int, int]] = []
-        self.paused = threading.Event()
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, daemon=True)
-
-    def start(self) -> None:
-        self._thread.start()
-
-    def _run(self) -> None:
-        while not self._stop.wait(0.005):
-            if self.paused.is_set():
-                continue
-            fg = user32.GetForegroundWindow()
-            if fg and _window_pid(fg) in self.forbidden:
-                self.hits.append((time.monotonic(), int(fg), _window_pid(fg)))
-
-    def stop(self) -> None:
-        self._stop.set()
-        self._thread.join(timeout=1)
-
-
 class Report:
     def __init__(self) -> None:
         self.rows: list[dict] = []
@@ -437,7 +342,7 @@ def _element_index(state: dict, type_name: str, name: str | None = None) -> int:
     raise LookupError(f"{type_name} {name or ''} absent de la lecture UIA ({len(state['elements'])} éléments)")
 
 
-def validate_family(cc, report: Report, fixture: Fixture, family: str, expected: dict[str, str]) -> None:
+def validate_family(cc, report: Report, fixture: Any, family: str, expected: dict[str, str]) -> None:
     hwnd = fixture.hwnd
     tag = family
 
@@ -685,7 +590,7 @@ def validate_gemini_form(cc, mcp, report: Report, fixture, family: str) -> None:
                    shortcut_refused)  # fmt: skip
 
 
-def validate_physical(cc, report: Report, fixture: Fixture, julien_fg: int) -> None:
+def validate_physical(cc, report: Report, fixture: Any, julien_fg: int) -> None:
     """Vraie souris et vrai clavier (FocusGuard) sur la fenêtre de test : seulement si Julien est inactif depuis 120 s."""
     hwnd = fixture.hwnd
     state = cc.get_window_state(hwnd=hwnd, max_elements=100)
@@ -759,15 +664,15 @@ def main_validation() -> int:
     user32.GetCursorPos(ctypes.byref(cursor))
     clip_seq = int(user32.GetClipboardSequenceNumber())
     token = physical_input.mark()
-    watch = ForegroundWatch()
-    fixtures: list[Any] = []  # Fixture locale ou desktop_fixtures.Fixture (même interface close)
+    watch = df.ForegroundWatch()
+    fixtures: list[Any] = []  # desktop_fixtures.Fixture, inscrites au garde de présence
     try:
-        win32 = Fixture("Win32", [sys.executable, "-B", str(Path(__file__).resolve()), "--win32-fixture"])
+        win32 = df.Fixture("Win32", [sys.executable, "-B", str(Path(__file__).resolve()), "--win32-fixture"])
         fixtures.append(win32)
         watch.forbidden.add(win32.pid)
         encoded = base64.b64encode(WINFORMS_SCRIPT.encode("utf-16-le")).decode("ascii")
         try:
-            winforms = Fixture(
+            winforms = df.Fixture(
                 "WinForms",
                 ["powershell.exe", "-NoProfile", "-NonInteractive", "-STA", "-ExecutionPolicy", "Bypass",
                  "-EncodedCommand", encoded],
@@ -781,7 +686,7 @@ def main_validation() -> int:
         time.sleep(0.3)
         fg_now = int(user32.GetForegroundWindow() or 0)
         fixture_pids = {f.pid for f in fixtures}
-        stolen = bool(watch.hits) or (fg_now != julien_fg and _window_pid(fg_now) in fixture_pids)
+        stolen = bool(watch.hits) or (fg_now != julien_fg and df.window_pid(fg_now) in fixture_pids)
         report.check(
             "Fenêtres de test affichées sans activation",
             not stolen,

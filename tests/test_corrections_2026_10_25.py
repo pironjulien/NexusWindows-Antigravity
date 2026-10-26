@@ -91,3 +91,35 @@ def test_right_click_is_proven_only_by_a_new_menu(monkeypatch):
 
 def test_context_menus_of_a_real_window_list_is_a_set():
     assert isinstance(computer_client.context_menus(0), set)
+
+
+def test_a_tree_change_alone_does_not_prove_a_chromium_key(monkeypatch):
+    """Parity bench of 26/10: the simulated activation moves the focus (tree changed) and Ctrl+K in Electron answered ✓
+    with nothing received. Keys sent under simulated activation are proven by structure only (title, windows, size)."""
+    same = {"title": "Labo", "windows": (1,), "image": None, "rect": (0, 0, 10, 10), "tree": "avant"}
+    monkeypatch.setattr(computer_client, "window_fingerprint", lambda _hwnd, with_tree=False: dict(same))
+    monkeypatch.setattr(computer_client, "_tree_digest", lambda _hwnd: "après")  # focus moved by the activation
+    verified, _how = computer_client._wait_window_effect(1, dict(same), timeout=0.05, structural_only=True)
+    assert verified is None
+    verified, how = computer_client._wait_window_effect(1, dict(same), timeout=0.05)
+    assert verified is True and "arbre" in how  # without structural_only, the tree alone would have passed
+    retitled = dict(same, title="Labo — Ctrl+K")
+    monkeypatch.setattr(computer_client, "window_fingerprint", lambda _hwnd, with_tree=False: dict(retitled))
+    verified, _how = computer_client._wait_window_effect(1, dict(same), timeout=0.05, structural_only=True)
+    assert verified is True
+
+
+def test_a_label_missing_from_the_window_is_looked_for_in_the_open_menus(monkeypatch):
+    """Parity bench of 26/10: right click opened the WinForms context menu (its own top-level window), then "Copier"
+    was not found in the main window. It is now looked for in the open menus of the same process, never elsewhere."""
+    monkeypatch.setattr(computer_client, "app_pid", lambda _hwnd: 42)
+    monkeypatch.setattr(computer_client, "context_menus", lambda _pid: {10, 20})
+
+    def resolve(s, hwnd):
+        if hwnd == 20:
+            return 3, None
+        raise computer_client.TargetNotFoundError("absent")
+
+    monkeypatch.setattr(computer_client, "_resolve_step_target", resolve)
+    assert computer_client._resolve_in_open_menus({"target": "Copier"}, 1) == (20, 3, None)
+    assert computer_client._resolve_in_open_menus({"target": [1, 2, 3, 4]}, 1) is None
