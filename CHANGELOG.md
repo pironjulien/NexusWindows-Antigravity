@@ -9,6 +9,12 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.2.8] - 2026-10-26
+
+### Changed
+- Plugin logo (`plugins/nexus-computer/logo.png`, 256 px): the Nexus family icon, the NexusWindows screen pictogram in
+  the julienpiron.fr medallion, the same on the site and in every Nexus product.
+
 ## [3.2.7] - 2026-10-26
 
 ### Fixed
