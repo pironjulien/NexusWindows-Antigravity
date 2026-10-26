@@ -9,6 +9,13 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.2.3] - 2026-10-26
+
+### Changed
+- README: the 51-task comparison of 3.0.2 is replaced by the family's common bench of October 25, 2026 (165 trials:
+  Claude 120, Antigravity 119, Codex 120 exact effects), with the Cua Driver and Windows-MCP comparison linked in
+  NexusWindows for Claude.
+
 ## [3.2.2] - 2026-10-26
 
 Two false successes from the common parity bench of 26/10.
@@ -405,7 +412,8 @@ Also released with 2.7.0, the first release after 2.5.0 (changes of 2026-10-14 t
   ([chrome-computer-use](https://github.com/pironjulien/chrome-computer-use)).
 - The floating companion window and the former multi-adapter layout of 2.5.0.
 
-[Unreleased]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.2...HEAD
+[Unreleased]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.3...HEAD
+[3.2.3]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.2...v3.2.3
 [3.2.2]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.1...v3.2.2
 [3.2.1]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.2.0...v3.2.1
 [3.2.0]: https://github.com/pironjulien/NexusWindows-Antigravity/compare/v3.1.7...v3.2.0

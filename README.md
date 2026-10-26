@@ -20,7 +20,7 @@ Antigravity (Gemini) see and operate Windows desktop applications while the user
 foreground window. Built for a fast model: one look, then one batch of steps with label targets, and every reply
 says what to do next.
 
-Version 3.2.2 · Windows 10/11 · Python 3.11+ · MIT licence
+Version 3.2.3 · Windows 10/11 · Python 3.11+ · MIT licence
 
 Part of the Nexus family: [NexusWindows](https://julienpiron.fr/nexuswindows/)
 ([Claude](https://github.com/pironjulien/NexusWindows-Claude) ·
@@ -187,22 +187,26 @@ Tool descriptions, server instructions, tool and parameter names are in English;
   emergency stop (Ctrl+Alt+Shift+Esc, `%USERPROFILE%\.nexus\stop`), the same file protocols as
   [NexusWindows for Claude](https://github.com/pironjulien/NexusWindows-Claude#working-alongside-other-agents).
 
-## Side by side with Cua Driver and Windows-MCP (October 24, 2026)
+## Common bench of the NexusWindows family (October 25, 2026)
 
-The three-tool bench of NexusWindows for Claude (`bench/cua_vs_nexus.py` with `NEXUS_BENCH_EDITION=antigravity`) drove
-this server, [Cua Driver](https://github.com/trycua/cua) 0.38.0 and [Windows-MCP](https://github.com/CursorTouch/Windows-MCP)
-0.8.8 through their real MCP servers on the same lab windows (Win32, WinForms, WPF, Tk, Electron, Edge), each covered
-by an opaque window, nobody at the PC. The effect is judged by the application, never by the tool's report. "Strict
-background" counts an effect only when the foreground stayed the user's, the cursor never moved and the tool reported
-no physical input. Raw results: [NexusWindows-Claude bench/results](https://github.com/pironjulien/NexusWindows-Claude/tree/main/bench/results).
+The three editions are measured together by the family's common bench: 55 tasks on lab windows (Win32, WinForms,
+WPF, Tk, Electron and Edge, plus launching an application behind a maximized window), three rounds each, every lab
+window covered by another window, run only while nobody uses the PC (a run stops and is not counted when the user
+comes back). The effect is judged by the application itself, never by the tool's report. "Without intrusion" counts an
+effect only when the user's foreground window and cursor stayed untouched.
 
-| 51 tasks | NexusWindows for Antigravity 3.0.2 | Cua Driver 0.38.0 |
-|---|---|---|
-| Effect proven in strict background | 43 | 22 |
-| False success (reported done, the app got nothing) | 0 | 4 |
+| 165 trials (55 tasks × 3) | Claude 3.2.2 | Antigravity 3.1.7 | Codex 3.1.4 |
+|---|---|---|---|
+| Exact effect | 120 | 119 | 120 |
+| Exact effect without intrusion | 114 | 113 | 113 |
+| False success (reported done, the app got nothing) | 0 | 3 | 0 |
+| Median / p95 time per task | 695 / 5179 ms | 702 / 3063 ms | 402 / 2909 ms |
 
-From 3.0.1 (38) to 3.0.2: Tk clicks, shortcuts and list scrolling, and scrolling covered Chromium lists. Windows-MCP
-has no background mode: it reached no effect without taking the screen.
+The three false successes of this edition (Ctrl+K in Electron) and its missed WinForms context menu are fixed in
+3.2.2. In this run the Electron lab published no page once covered, so every Electron task failed for all three
+tools; the lab is fixed and Electron will count at the next run. A comparison with
+[Cua Driver](https://github.com/trycua/cua) and [Windows-MCP](https://github.com/CursorTouch/Windows-MCP) is in
+[NexusWindows for Claude](https://github.com/pironjulien/NexusWindows-Claude#side-by-side-with-cua-driver-and-windows-mcp-october-23-2026).
 
 ## Architecture
 
