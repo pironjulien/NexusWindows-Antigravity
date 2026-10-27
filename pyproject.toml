@@ -1,6 +1,6 @@
 [project]
 name = "nexus-windows-antigravity"
-version = "3.2.8"
+version = "3.2.9"
 description = "NexusWindows for Antigravity: Windows computer use in the background for Google Antigravity (MCP server)."
 readme = "README.md"
 license = "MIT"

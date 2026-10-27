@@ -9,6 +9,11 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.2.9] - 2026-10-27
+
+### Changed
+- Sharper plugin logo (256 px): the julienpiron.fr medallion rebuilt at 600 px in the icon kit, sharp up to 512 px instead of a 240 px picture enlarged.
+
 ## [3.2.8] - 2026-10-26
 
 ### Changed
