@@ -9,6 +9,13 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-10-27
+
+### Changed
+- Images sent to the AI follow the common Nexus image rule of 27/10: long side up to 2000 px and 2.56 MP (was 1568 px
+  and 1.15 MP), lossless WebP while it fits 500 KB (was 200 KB, so a real screen went lossy), then quality 90, 80,
+  70…; never over 500 KB. Small text is read better (98.8 % of characters instead of 92 % in our benchmark).
+
 ## [3.2.10] - 2026-10-27
 
 ### Changed

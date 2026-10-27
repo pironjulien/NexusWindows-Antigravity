@@ -1704,7 +1704,7 @@ def _activate_window(target_hwnd: int) -> bool:
 
 
 # -----------------------------------------------------------------------------
-# Screen & Window Capture (Anti-Crash 400 Guaranteed < 200 KB)
+# Screen & Window Capture (règle image commune : ≤ 2000 px, ≤ 500 Ko)
 # -----------------------------------------------------------------------------
 SCREENSHOT_KEEP = 50  # captures gardées au plus (README : « at most 50 »)
 SCREENSHOT_MAX_AGE_H = 24.0  # âge maximal d'une capture
@@ -2353,18 +2353,18 @@ def capture_window_image(
 ) -> tuple[bytes, dict[str, Any]]: ...
 
 
-# Règle image commune des produits Nexus (NexusShared/images.md, 24/10) : côté long ≤ 1568 px et ≤ 1,15 Mpx (Gemini 3,
-# Claude et GPT-5.x lisent cette taille sans la réduire), WebP sans perte jusqu'à 200 Ko, puis qualité 85, 70…
-# jusqu'à tenir 500 Ko : au-delà, Antigravity échoue en 400 (crash vu avant le 24/10).
-IMAGE_MAX_SIDE = 1568
-IMAGE_MAX_PIXELS = 1_150_000
-IMAGE_LOSSLESS_BUDGET = 200 * 1024
+# Règle image commune des produits Nexus (NexusShared/images.md, 27/10) : côté long ≤ 2000 px et ≤ 2,56 Mpx, la même
+# pour les trois IA (Gemini 3 compte un nombre fixe de jetons par image : une image plus nette ne coûte rien de plus),
+# WebP sans perte tant qu'il tient 500 Ko, sinon la meilleure qualité qui tient ; jamais plus de 500 Ko (plafond gardé
+# pour Antigravity : son erreur 400 « Unable to process input image » venait d'une capture brute du téléphone).
+IMAGE_MAX_SIDE = 2000
+IMAGE_MAX_PIXELS = 2_560_000
 IMAGE_LIMIT = 500 * 1024
 ZOOM_MAX_ENLARGE = 2.0  # zone zoomée agrandie au plus ×2 (lecture d'un petit texte), dans les mêmes plafonds
 
 
 def encode_webp(img: Image.Image) -> bytes:
-    """Image envoyée au modèle : WebP sans perte si ≤ 200 Ko, sinon qualité décroissante jusqu'à ≤ 500 Ko (à 0, un
+    """Image envoyée au modèle : WebP sans perte si ≤ 500 Ko, sinon qualité décroissante jusqu'à ≤ 500 Ko (à 0, un
     écran entier de bruit pèse moins de 100 Ko). Mêmes dimensions : l'échelle annoncée reste juste."""
     rgb = img.convert("RGB")
 
@@ -2374,12 +2374,11 @@ def encode_webp(img: Image.Image) -> bytes:
         return buffer.getvalue()
 
     data = encode(lossless=True)
-    if len(data) <= IMAGE_LOSSLESS_BUDGET:
+    if len(data) <= IMAGE_LIMIT:
         return data
-    for quality, budget in ((85, IMAGE_LOSSLESS_BUDGET), (70, IMAGE_LIMIT), (50, IMAGE_LIMIT), (30, IMAGE_LIMIT),
-                            (10, IMAGE_LIMIT), (0, IMAGE_LIMIT)):  # fmt: skip
+    for quality in (90, 80, 70, 50, 30, 10, 0):
         data = encode(quality=quality)
-        if len(data) <= budget:
+        if len(data) <= IMAGE_LIMIT:
             return data
     return data
 
@@ -2393,7 +2392,7 @@ def image_print(img: Image.Image) -> str:
 
 
 def _fit(img: Image.Image, max_dimension: int, enlarge: float = 1.0) -> Image.Image:
-    """Taille envoyée : côté long ≤ max_dimension (1568 au plus) et ≤ 1,15 Mpx ; agrandie au plus de `enlarge`."""
+    """Taille envoyée : côté long ≤ max_dimension (2000 au plus) et ≤ 2,56 Mpx ; agrandie au plus de `enlarge`."""
     width, height = img.size
     side = min(max_dimension, IMAGE_MAX_SIDE)
     scale = min(enlarge, side / max(width, height), (IMAGE_MAX_PIXELS / (width * height)) ** 0.5)
@@ -2411,7 +2410,7 @@ def capture_window_image(
     return_meta: bool = False,
     elements_to_annotate: list[dict[str, Any]] | None = None,
 ) -> bytes | tuple[bytes, dict[str, Any]]:
-    """Captures the target window or full screen as WebP (common image rule: ≤ 1568 px, ≤ 1.15 Mpx, ≤ 500 KB).
+    """Captures the target window or full screen as WebP (common image rule: ≤ 2000 px, ≤ 2.56 Mpx, ≤ 500 KB).
 
     zoom: box_2d [ymin, xmin, ymax, xmax] (0-1000) of the window, captured at full resolution and enlarged up to ×2
     (no marks drawn: the window's box_2d stay those of the whole image).

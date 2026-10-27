@@ -110,7 +110,7 @@ def test_next_for_act_points_at_the_first_problem():
     assert agent_guard.next_for_act(error).startswith("étape 2 : ✗ échec : boom")
 
 
-def _fake_capture(hwnd, max_dimension=1568, return_meta=False):
+def _fake_capture(hwnd, max_dimension=2000, return_meta=False):
     """Capture factice (WebP), sans empreinte : jointe à chaque fois."""
     return (b"RIFFwebp", {"image_print": None}) if return_meta else b"RIFFwebp"
 

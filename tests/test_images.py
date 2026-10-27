@@ -1,4 +1,4 @@
-"""Règle image commune des produits Nexus (NexusShared/images.md, 24/10) : 1568 px / 1,15 Mpx, WebP, 500 Ko, zoom, pas de
+"""Règle image commune des produits Nexus (NexusShared/images.md, 27/10) : 2000 px / 2,56 Mpx, WebP, 500 Ko, zoom, pas de
 double, échelle dite."""
 
 from __future__ import annotations
@@ -35,15 +35,15 @@ def test_ui_capture_is_lossless_webp_within_the_common_limits(monkeypatch):
     data, meta = computer_client.capture_window_image(4242, return_meta=True)
     back = Image.open(io.BytesIO(data))
     width, height = back.size
-    assert back.format == "WEBP" and max(width, height) <= 1568 and width * height <= 1_150_000
-    assert width > 1280  # avant : 1280 px
-    assert len(data) <= computer_client.IMAGE_LOSSLESS_BUDGET
+    assert back.format == "WEBP" and (width, height) == (2000, 1125)  # avant : 1429×804 (1,15 Mpx), 1280 px plus tôt
+    assert back.convert("RGB").tobytes() == computer_client._fit(_ui(2560, 1440), 2000).tobytes()  # sans perte
+    assert len(data) <= computer_client.IMAGE_LIMIT
     assert meta["scale_factor"] == round(width / 2560, 4) and meta["image_print"]
 
 
 def test_noisy_capture_stays_under_the_hard_limit_with_the_same_size():
     random.seed(3)
-    image = Image.frombytes("RGB", (1568, 733), random.randbytes(1568 * 733 * 3))
+    image = Image.frombytes("RGB", (2000, 1125), random.randbytes(2000 * 1125 * 3))
     data = computer_client.encode_webp(image)
     assert Image.open(io.BytesIO(data)).size == image.size  # échelle annoncée inchangée
     assert len(data) <= computer_client.IMAGE_LIMIT
@@ -82,17 +82,17 @@ def test_look_text_gives_the_zoom_origin_and_scale():
 
 
 def test_zoom_scales_are_exact_per_axis(monkeypatch):
-    # Scénario de Codex : fenêtre 1001×1000, zoom [0, 1, 1000, 2] → zone 2×1000, image 3×1568 : échelles 1,5 et 1,568.
-    window = Image.new("RGB", (1001, 1000), (255, 255, 255))
-    window.paste((255, 0, 0), (0, 500, 1001, 501))  # ligne rouge à y fenêtre = 500
+    # Scénario de Codex : fenêtre 1001×1200, zoom [0, 1, 1000, 2] → zone 2×1200, image 3×2000 : échelles 1,5 et 1,667.
+    window = Image.new("RGB", (1001, 1200), (255, 255, 255))
+    window.paste((255, 0, 0), (0, 600, 1001, 601))  # ligne rouge à y fenêtre = 600
     _capture(monkeypatch, window)
     data, meta = computer_client.capture_window_image(4242, zoom=[0, 1, 1000, 2], return_meta=True)
     image = Image.open(io.BytesIO(data)).convert("RGB")
-    assert image.size == (3, 1568) and meta["image_origin"] == (1.0, 0.0)
+    assert image.size == (3, 2000) and meta["image_origin"] == (1.0, 0.0)
     green = image.getchannel("G").tobytes()  # rouge : peu de vert
     rows = [y for y in range(image.height) if green[y * image.width + 1] < 128]
     y_image = sum(rows) / len(rows)
-    assert abs(meta["image_origin"][1] + y_image / meta["scale_y"] - 500) <= 1.0  # avant : 238 px d'écart
+    assert abs(meta["image_origin"][1] + y_image / meta["scale_y"] - 600) <= 1.0  # avant : 238 px d'écart
 
 
 def test_json_look_stays_valid_when_the_image_is_unchanged(monkeypatch, tmp_path: Path):

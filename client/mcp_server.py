@@ -162,7 +162,7 @@ def _register_legacy_computer_tool(annotations: ToolAnnotations) -> Callable[[An
 # anciens restent appelables par leur nom (alias, comptes rendus identiques), simplement non listés.
 # Capture jointe aux actions dont l'effet n'est pas relu (WebP) : la limite commune, computer_client.IMAGE_MAX_SIDE
 # (valeur écrite ici : hors Windows, computer_client est un bouchon et le serveur doit démarrer pour les annuaires).
-ACTION_IMAGE_MAX = 1568
+ACTION_IMAGE_MAX = 2000
 # (fenêtre, zone zoomée ou None) → empreinte de la dernière image envoyée : la même ne repart pas (règle commune)
 _SENT_IMAGES: dict[tuple[int, tuple[int, ...] | None], str] = {}
 UNCHANGED_NOTE = (
@@ -192,7 +192,7 @@ NO_IMAGE_ERRORS = {
 
 
 def _window_image(window: int) -> Image | str | None:
-    """Capture compacte de la fenêtre (WebP ≤ 1568 px, sans la mettre devant), pour que Gemini vérifie de visu ;
+    """Capture compacte de la fenêtre (WebP ≤ 2000 px, sans la mettre devant), pour que Gemini vérifie de visu ;
     même écran que la dernière image envoyée : la note « image inchangée » à la place."""
     try:
         data, meta = computer_client.capture_window_image(window, max_dimension=ACTION_IMAGE_MAX, return_meta=True)
@@ -363,7 +363,7 @@ def computer_look(
 ) -> Any:
     """GOLDEN RULE: look → act in one batch, targets by label; never resend a batch without looking.
     See a NAMED window (hwnd: number, title or process) WITHOUT bringing it to the front (covered ones too): one line
-    per element "[N] role "name" = "value" states @x,y"; image (WebP ≤ 1568 px) only if the tree is too thin, or with
+    per element "[N] role "name" = "value" states @x,y"; image (WebP ≤ 2000 px) only if the tree is too thin, or with
     capture_screenshot=true, annotate (numbers drawn) or zoom=box_2d (area enlarged); query filters; format="json":
     compact JSON (box_2d 0-1000 per element). Same screen as the last image sent: not attached again. Unlocks a batch.
     Example: {"hwnd": "Notepad", "query": "save"}"""
@@ -711,7 +711,7 @@ def computer_take_screenshot(
     output_path: str | None = None,
     annotate_screenshot: bool = False,
 ) -> str:
-    """Alias de l'image de look : capture WebP (≤ 1568 px, ≤ 500 Ko) de la fenêtre nommée ou de tout l'écran, écrite
+    """Alias de l'image de look : capture WebP (≤ 2000 px, ≤ 500 Ko) de la fenêtre nommée ou de tout l'écran, écrite
     sur disque."""
 
     def _action() -> dict[str, Any]:
