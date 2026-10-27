@@ -2,6 +2,8 @@
 
 <!-- mcp-name: io.github.pironjulien/nexus-windows-antigravity -->
 
+<img src="https://raw.githubusercontent.com/pironjulien/NexusWindows-Antigravity/main/plugins/nexus-computer/logo.png" alt="NexusWindows icon" width="96">
+
 [![Release](https://img.shields.io/github/v/release/pironjulien/NexusWindows-Antigravity)](https://github.com/pironjulien/NexusWindows-Antigravity/releases)
 [![Tests](https://github.com/pironjulien/NexusWindows-Antigravity/actions/workflows/tests.yml/badge.svg)](https://github.com/pironjulien/NexusWindows-Antigravity/actions/workflows/tests.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/pironjulien/NexusWindows-Antigravity/badge)](https://scorecard.dev/viewer/?uri=github.com/pironjulien/NexusWindows-Antigravity)
@@ -20,7 +22,7 @@ Antigravity (Gemini) see and operate Windows desktop applications while the user
 foreground window. Built for a fast model: one look, then one batch of steps with label targets, and every reply
 says what to do next.
 
-Version 3.2.9 · Windows 10/11 · Python 3.11+ · MIT licence
+Version 3.2.10 · Windows 10/11 · Python 3.11+ · MIT licence
 
 Part of the Nexus family: [NexusWindows](https://julienpiron.fr/nexuswindows/)
 ([Claude](https://github.com/pironjulien/NexusWindows-Claude) ·
