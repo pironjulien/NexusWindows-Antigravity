@@ -142,7 +142,7 @@ def lignes(kind: str, app: str | None, cadre: str | None, out: dict[str, Any], m
                     step.get("action") or kind,
                     technique,
                     _issue_erreur(step) if step.get("status") == "error" else issue(step),
-                    None,
+                    step.get("ms") if isinstance(step.get("ms"), (int, float)) else ms / len(steps),
                     _premier_plan(result, technique),
                     step.get("error_type") or step.get("error"),
                 )  # fmt: skip

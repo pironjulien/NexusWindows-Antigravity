@@ -114,11 +114,12 @@ def test_common_journal_lines_from_mcp_answers(tmp_path):
     import journal_commun
 
     lot = {"status": "unverified", "data": {"steps": [
-        {"action": "set", "mark": "✓", "result": {"technique": "win32_em_replacesel"}},
+        {"action": "set", "mark": "✓", "result": {"technique": "win32_em_replacesel"}, "ms": 12.4},
         {"action": "drag", "mark": "~", "result": {"technique": "physical_sendinput", "physical": True}},
     ]}}  # fmt: skip
     lignes = journal_commun.lignes("act", "Notepad.exe", "Win32", lot, 50)
     assert [(x["action"], x["issue"], x["premier_plan"]) for x in lignes] == [("set", "✓", False), ("drag", "~", True)]
+    assert [x["ms"] for x in lignes] == [12, 25]  # durée de l'étape, sinon part du lot (93 % sans durée avant le 27/10)
     assert lignes[0]["appel"] == lignes[1]["appel"] and lignes[0]["app"] == "notepad.exe"
     assert (
         journal_commun.lignes("close", None, None, {"status": "refused", "refused": "repeat"}, 1)[0]["issue"] == "refus"

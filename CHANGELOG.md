@@ -9,6 +9,11 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.3.1] - 2026-10-27
+
+### Fixed
+- Local usage journal: every step of a batch now records its own duration (`ms`); most batch steps had none before.
+
 ## [3.3.0] - 2026-10-27
 
 ### Changed

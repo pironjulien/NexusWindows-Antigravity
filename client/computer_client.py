@@ -6828,6 +6828,7 @@ def act(
             s = dict(s) if isinstance(s, dict) else {}
             action = str(s.get("action", "")).lower().replace("-", "_").strip()
             expect = s.get("expect")
+            t_step = time.perf_counter()  # durée de l'étape, pour le journal commun (ms par ligne)
             try:
                 emergency_stop.check()  # point de contrôle entre les étapes
                 if not action:
@@ -6840,7 +6841,8 @@ def act(
                                         or observed.get("match") == "exact"):  # fmt: skip
                         results.append({"step": i, "action": action, "status": "ok", "already": True,
                                         "verified": True, "mark": agent_guard.MARK_ALREADY,
-                                        "observed": observed})  # fmt: skip
+                                        "observed": observed,
+                                        "ms": round((time.perf_counter() - t_step) * 1000, 1)})  # fmt: skip
                         continue
                 step_res = _run_act_step(action, s, target_hwnd, foreground, i)
                 if expect and isinstance(step_res, dict):
@@ -6863,6 +6865,7 @@ def act(
                         "mark": agent_guard.MARK_FAIL,
                         "error": str(error),
                         "error_type": type(error).__name__,
+                        "ms": round((time.perf_counter() - t_step) * 1000, 1),
                         **({"what": error.what} if isinstance(error, NeedsForegroundError) else {}),
                         **({"partial_input": True} if getattr(error, "partial_input", False) else {}),
                     }
@@ -6886,6 +6889,7 @@ def act(
                 "verified": verified,
                 "mark": agent_guard.mark(verified, success, already),
                 "result": step_res,
+                "ms": round((time.perf_counter() - t_step) * 1000, 1),
             }
             if already:
                 entry["already"] = True
