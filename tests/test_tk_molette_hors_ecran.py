@@ -153,3 +153,13 @@ def test_no_control_under_the_point_sends_nothing(monkeypatch):
     with pytest.raises(wc.MessageError, match="Aucun contrôle"):
         wc.tk_wheel_offscreen(42, 150, 160, -120)
     assert calls == []
+
+
+def test_overlapped_sees_any_window_above_that_touches_the_frame(monkeypatch):
+    _env(monkeypatch, covers={1: (290, 190, 400, 400)}, styles={1: 0x00080000})
+    assert wc.overlapped(42)  # même translucide : la copie d'écran ne montrerait pas que la cible
+
+
+def test_overlapped_ignores_windows_elsewhere(monkeypatch):
+    _env(monkeypatch, covers={1: (400, 400, 500, 500)})
+    assert not wc.overlapped(42)

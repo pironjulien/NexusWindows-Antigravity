@@ -9,6 +9,14 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.4.1] - 2026-10-27
+
+### Fixed
+- A covered window whose background capture comes out blank is no longer replaced by a copy of the screen at its
+  place, which showed the window on top as if it were the target: the capture is now refused with the reason and what
+  to do (read its tree, or capture it in the foreground). Any other window touching its frame counts, even a
+  translucent one.
+
 ## [3.4.0] - 2026-10-27 — Tk mouse wheel in the background
 
 ### Added

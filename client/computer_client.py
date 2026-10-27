@@ -2439,6 +2439,19 @@ def capture_window_image(
                 "height": rect["height"],
             }
 
+    if (
+        img is None
+        and not full_screen
+        and target_hwnd
+        and target_hwnd != user32.GetForegroundWindow()
+        and win32_controls.overlapped(target_hwnd)
+    ):
+        # Copie de l'écran d'une fenêtre recouverte : elle montrerait la fenêtre du dessus, présentée comme la cible
+        # (audit d'état de l'art du 27/10). Rien plutôt qu'une image fausse.
+        raise RuntimeError(
+            "Capture impossible en arrière-plan : la fenêtre est recouverte et ne se dessine pas hors écran (image "
+            "PrintWindow vide). Lis son arbre (look sans image), ou capture-la au premier plan (foreground=True)."
+        )
     if img is None:
         with mss.MSS() as sct:
             if full_screen or not target_hwnd:

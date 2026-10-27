@@ -1343,3 +1343,17 @@ def tk_wheel_offscreen(top: int, x: int, y: int, delta: int, horizontal: bool = 
     if failure is not None:
         raise failure
     return expected
+
+
+def overlapped(top: int) -> bool:
+    """Une autre fenêtre visible au-dessus de `top` (ordre z réel) chevauche son cadre, quelle que soit son opacité :
+    une copie de l'écran à cet endroit montrerait au moins en partie autre chose que `top`."""
+    left, top_y, right, bottom = _frame(top)
+    above = int(_GetWindow(top, GW_HWNDPREV) or 0)
+    while above:
+        if _IsWindowVisible(above) and not _IsIconic(above) and not _cloaked(above):
+            al, at, ar, ab = _frame(above)
+            if al < right and ar > left and at < bottom and ab > top_y:
+                return True
+        above = int(_GetWindow(above, GW_HWNDPREV) or 0)
+    return False
