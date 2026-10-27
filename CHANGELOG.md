@@ -9,6 +9,19 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-10-27 — Tk mouse wheel in the background
+
+### Added
+- Mouse wheel on a covered Tk window without the foreground or the real mouse (until now no edition had a background
+  technique). Tk sends the wheel to the window visible at the point of the message, so on a covered window it was
+  lost. With no native scroll bar beside the control, a Tk window that is ENTIRELY covered is moved beyond the virtual
+  desktop (no activation, no z-order change), the wheel is posted to the same control there (found before the move),
+  at the given point or at the centre of the targeted element, one axis at a time, and the window comes back to its
+  place, read back to the pixel. Coverage is exact: only windows proven opaque count (not layered, transparent,
+  without redirection bitmap or shaped by SetWindowRgn), rounded DWM corners left out at their monitor's scale; a
+  one-pixel visible strip is enough to refuse. A window that cannot be put back fails the step and stops the batch.
+  Common bench: Tk wheel 3/3 on a covered window, no foreground taken.
+
 ## [3.3.1] - 2026-10-27
 
 ### Fixed

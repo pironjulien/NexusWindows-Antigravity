@@ -1187,3 +1187,159 @@ def post_scroll_lines(bar: int, vertical: bool, forward: bool, lines: int) -> No
     for _ in range(lines):
         sender.post(parent, msg, SB_LINEDOWN if forward else SB_LINEUP, bar)
     sender.post(parent, msg, SB_ENDSCROLL, bar)
+
+
+# --- Molette Tk d'une fenêtre entièrement recouverte (recette de NexusWindows Claude 3.7.0, 27/10, relue cinq fois par
+# Codex) : Tk renvoie la molette à la fenêtre visible AU POINT du message (tkWinX.c) ; recouverte, elle est perdue. La
+# fenêtre, entièrement cachée, est déplacée au-delà du bureau virtuel le temps de la molette, puis remise et relue.
+_GetWindow = _fn("GetWindow", wintypes.HWND, wintypes.HWND, wintypes.UINT)
+_IsIconic = _fn("IsIconic", wintypes.BOOL, wintypes.HWND)
+_IsZoomed = _fn("IsZoomed", wintypes.BOOL, wintypes.HWND)
+_SetWindowPos = _fn(
+    "SetWindowPos", wintypes.BOOL, wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    ctypes.c_int, wintypes.UINT,
+)  # fmt: skip
+_GetSystemMetrics = _fn("GetSystemMetrics", ctypes.c_int, ctypes.c_int)
+_GetDpiForWindow = _fn("GetDpiForWindow", wintypes.UINT, wintypes.HWND)
+_GetWindowRgnBox = _fn("GetWindowRgnBox", ctypes.c_int, wintypes.HWND, ctypes.c_void_p)
+_DwmGetWindowAttribute = ctypes.WinDLL("dwmapi").DwmGetWindowAttribute
+_DwmGetWindowAttribute.restype = ctypes.c_long
+_DwmGetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
+GW_HWNDPREV, GWL_EXSTYLE, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_CLOAKED = 3, -20, 9, 14
+SM_XVIRTUALSCREEN, SM_CXVIRTUALSCREEN = 76, 78
+SWP_NOSIZE, SWP_NOZORDER, SWP_NOACTIVATE = 0x0001, 0x0004, 0x0010
+# Styles qui ne prouvent pas l'opacité : translucide (LAYERED), traversée (TRANSPARENT), composition sans bitmap
+# (NOREDIRECTIONBITMAP : client possiblement entièrement transparent).
+NOT_OPAQUE = 0x00000020 | 0x00080000 | 0x00200000
+OFFSCREEN_SETTLE_S, OFFSCREEN_HOLD_S = 0.15, 0.3
+Box = tuple[int, int, int, int]
+
+
+class WindowNotRestored(RuntimeError):
+    """La fenêtre déplacée n'a pas pu revenir à sa place : échec de l'action, jamais une issue simplement incertaine
+    (ni MessageError, donc aucune autre technique ensuite)."""
+
+
+def _frame(hwnd: int) -> Box:
+    """Cadre visible (DWM, sans l'ombre) ; à défaut, le rectangle de la fenêtre."""
+    r = wintypes.RECT()
+    if _DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, ctypes.byref(r), ctypes.sizeof(r)) == 0:
+        return r.left, r.top, r.right, r.bottom
+    return _rect(hwnd)
+
+
+def _cloaked(hwnd: int) -> bool:
+    value = wintypes.DWORD()
+    size = ctypes.sizeof(value)
+    return _DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, ctypes.byref(value), size) == 0 and bool(value.value)
+
+
+def _monitor_dpi(hwnd: int) -> int:
+    """DPI effectif du moniteur de la fenêtre ; illisible : 0."""
+    monitor = _MonitorFromWindow(hwnd, 2)
+    dpi_x, dpi_y = wintypes.UINT(), wintypes.UINT()
+    if not monitor or _GetDpiForMonitor(monitor, 0, ctypes.byref(dpi_x), ctypes.byref(dpi_y)) != 0:
+        return 0
+    return int(dpi_x.value)
+
+
+def _corner(hwnd: int) -> int:
+    """Rayon majoré des coins arrondis DWM : 8 px à 100 %, linéaire avec l'échelle du MONITEUR (GetDpiForWindow rend
+    96 pour une application non adaptée au DPI), + 2 px ; échelle illisible : 0 (la fenêtre ne couvre rien)."""
+    dpi = _monitor_dpi(hwnd)
+    return -(-8 * max(dpi, int(_GetDpiForWindow(hwnd))) // 96) + 2 if dpi else 0
+
+
+def _minus(box: Box, cut: Box) -> list[Box]:
+    """box privé de cut : jusqu'à quatre rectangles."""
+    left, top, right, bottom = box
+    cl, ct, cr, cb = cut
+    if cl >= right or cr <= left or ct >= bottom or cb <= top:
+        return [box]
+    out = []
+    if ct > top:
+        out.append((left, top, right, ct))
+    if cb < bottom:
+        out.append((left, cb, right, bottom))
+    mid_top, mid_bottom = max(top, ct), min(bottom, cb)
+    if cl > left:
+        out.append((left, mid_top, cl, mid_bottom))
+    if cr < right:
+        out.append((cr, mid_top, right, mid_bottom))
+    return out
+
+
+def fully_covered(top: int) -> bool:
+    """Aucun pixel de la fenêtre n'est visible : son cadre privé du cadre de chaque fenêtre au-dessus d'elle (ordre z
+    réel). Seules comptent les fenêtres visibles, non réduites, non masquées par DWM, sans style NOT_OPAQUE ni région
+    SetWindowRgn, coins arrondis DWM exclus à l'échelle de leur moniteur ; un seul pixel visible suffit à refuser."""
+    left = [_frame(top)]
+    above = int(_GetWindow(top, GW_HWNDPREV) or 0)
+    while above and left:
+        if (
+            _IsWindowVisible(above)
+            and not _IsIconic(above)
+            and not _cloaked(above)
+            and not _GetWindowLongW(above, GWL_EXSTYLE) & NOT_OPAQUE
+            and not _GetWindowRgnBox(above, ctypes.byref(wintypes.RECT()))
+            and (k := _corner(above))
+        ):
+            cl, ct, cr, cb = _frame(above)
+            for cover in ((cl + k, ct, cr - k, cb), (cl, ct + k, cr, cb - k)):
+                left = [piece for box in left for piece in _minus(box, cover)]
+        above = int(_GetWindow(above, GW_HWNDPREV) or 0)
+    return not left
+
+
+def tk_wheel_offscreen(top: int, x: int, y: int, delta: int, horizontal: bool = False, check=None) -> int:
+    """Molette Tk d'une fenêtre ENTIÈREMENT recouverte : déplacée au-delà du bureau virtuel (sans activation ni
+    changement d'ordre), molette postée au MÊME contrôle (relevé avant le déplacement), retour relu au rectangle entier
+    avec un second essai. Refus, rien envoyé (MessageError) : fenêtre agrandie, réduite ou en partie visible, autre
+    contrôle au point une fois dehors, fenêtre ramenée devant par l'utilisateur. Fenêtre non remise : WindowNotRestored.
+    Le délai tenu dehors n'est pas un accusé de traitement ; event.x/y de Tk viennent du curseur (GetMessagePos)."""
+    if _IsZoomed(top) or _IsIconic(top):
+        raise MessageError("Fenêtre agrandie ou réduite : jamais déplacée, rien n'a été envoyé.")
+    if not fully_covered(top):
+        raise MessageError("Fenêtre en partie visible : jamais déplacée hors écran, rien n'a été envoyé.")
+    place = _rect(top)
+    expected = deepest_child_at(top, x, y)
+    if not expected or not is_window(expected):
+        raise MessageError("Aucun contrôle sous le point : rien n'a été envoyé.")
+    right = _GetSystemMetrics(SM_XVIRTUALSCREEN) + _GetSystemMetrics(SM_CXVIRTUALSCREEN)
+    dx = right + 50 - place[0]
+    flags = SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+    thread = _thread_of(top)
+    if check:
+        check()  # arrêt d'urgence : la fenêtre n'a pas bougé
+    posted = False
+    failure: BaseException | None = None
+    try:
+        if not _SetWindowPos(top, None, place[0] + dx, place[1], 0, 0, flags):
+            raise MessageError("Fenêtre impossible à déplacer : rien n'a été envoyé.")
+        time.sleep(OFFSCREEN_SETTLE_S)
+        if deepest_child_at(top, x + dx, y) != expected or int(_WindowFromPoint(_POINT(x + dx, y)) or 0) != expected:
+            raise MessageError("Dehors, le point ne tombe pas sur le même contrôle : rien n'a été envoyé.")
+        if check:
+            check()
+        if _in_front(thread):  # seul un Alt+Tab peut l'atteindre dehors
+            raise MessageError("Fenêtre ramenée au premier plan entre-temps : rien n'a été envoyé.")
+        msg = WM_MOUSEHWHEEL if horizontal else WM_MOUSEWHEEL
+        post(expected, msg, (delta & 0xFFFF) << 16, _lparam_xy(x + dx, y))
+        posted = True
+        time.sleep(OFFSCREEN_HOLD_S)
+    except BaseException as error:  # noqa: BLE001  (rendue après le retour de la fenêtre)
+        failure = error
+    back = bool(_SetWindowPos(top, None, place[0], place[1], 0, 0, flags)) and _rect(top) == place
+    if not back:
+        time.sleep(0.05)
+        width, height = place[2] - place[0], place[3] - place[1]
+        back = bool(_SetWindowPos(top, None, place[0], place[1], width, height, SWP_NOZORDER | SWP_NOACTIVATE))
+        back = back and _rect(top) == place
+    if not back:
+        sent = "molette envoyée, effet inconnu" if posted else "rien n'a été envoyé"
+        raise WindowNotRestored(
+            f"Fenêtre impossible à remettre exactement en ({place[0]}, {place[1]}) : {sent}. La regarder avant tout."
+        ) from failure
+    if failure is not None:
+        raise failure
+    return expected

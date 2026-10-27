@@ -22,7 +22,7 @@ Antigravity (Gemini) see and operate Windows desktop applications while the user
 foreground window. Built for a fast model: one look, then one batch of steps with label targets, and every reply
 says what to do next.
 
-Version 3.3.1 · Windows 10/11 · Python 3.11+ · MIT licence
+Version 3.4.0 · Windows 10/11 · Python 3.11+ · MIT licence
 
 Part of the Nexus family: [NexusWindows](https://julienpiron.fr/nexuswindows/)
 ([Claude](https://github.com/pironjulien/NexusWindows-Claude) ·
@@ -260,8 +260,10 @@ Questions or concerns: open an issue on this repository.
   nothing changes). For web pages, [NexusBrowser](https://github.com/pironjulien/NexusBrowser) is more reliable.
 - An effect with nothing readable stays `~` (not verified).
 - Still refused in the background, with the cause read in each toolkit's source: WPF clicks at a point, wheel and
-  shortcuts (WPF drops a click while the real cursor is not over its window); a wheel on a covered Chromium or Tk
-  canvas (both route it to the window on top); a click at a point of a covered Electron page that has gone `hidden`.
+  shortcuts (WPF drops a click while the real cursor is not over its window); a wheel on a covered Chromium canvas
+  (Chromium routes it to the window on top), or on a PARTLY visible Tk window (an entirely covered one is moved off
+  screen for the wheel, then put back, since 3.4.0); a click at a point of a covered Electron page that has gone
+  `hidden`.
 
 ## Development
 

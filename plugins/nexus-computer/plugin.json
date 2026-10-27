@@ -2,7 +2,7 @@
   "$schema": "https://antigravity.google/schemas/v1/plugin.json",
   "name": "nexus-computer",
   "displayName": "NexusWindows for Antigravity",
-  "version": "3.3.1",
+  "version": "3.4.0",
   "description": "NexusWindows for Antigravity: Windows computer use in the background (UI Automation, Win32 messages), real mouse and keyboard only as a fallback, every action read back, confirmation only to pay, send or publish.",
   "logo": "logo.png",
   "suggestedPrompts": [

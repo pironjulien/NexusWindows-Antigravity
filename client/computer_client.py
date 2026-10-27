@@ -5292,6 +5292,39 @@ def scroll(
                       "verified": outcome["verified"], "message": outcome["message"]}  # fmt: skip
             return result
 
+    # 1 quater. Tk sans barre native : fenêtre ENTIÈREMENT recouverte déplacée hors écran le temps de la molette, puis
+    # remise et relue (recette de NexusWindows Claude 3.7.0, 27/10), au point donné ou au centre de l'élément visé, un
+    # axe à la fois. Refus (MessageError) : rien envoyé, on continue. Fenêtre non remise (WindowNotRestored) : l'erreur
+    # remonte, échec terminal de l'étape que nulle postcondition ne rend réussie (relecture d'Antigravity du 27/10).
+    if family == "Tk" and bool(delta_y) != bool(delta_x):
+        tk_point: tuple[int, int] | None = None
+        if x is not None and y is not None:
+            if coords == "screen":
+                tk_point = (int(x), int(y))
+            else:
+                rect = get_window_rect(target_hwnd)
+                tk_point = (rect["left"] + int(x), rect["top"] + int(y))
+        elif element_index is not None:
+            crect = get_cached_element(element_index, target_hwnd).BoundingRectangle
+            tk_point = ((crect.left + crect.right) // 2, (crect.top + crect.bottom) // 2)
+        if tk_point is not None:
+            top = win32_controls.root_of(target_hwnd) or target_hwnd
+            before = window_fingerprint(target_hwnd, with_tree=True)
+            try:
+                win32_controls.tk_wheel_offscreen(
+                    top, tk_point[0], tk_point[1], (delta_y or delta_x) * 120, bool(delta_x), check=emergency_stop.check
+                )
+            except win32_controls.MessageError:
+                pass
+            else:
+                verified, how = _wait_window_effect(target_hwnd, before)
+                result = {"success": _success(verified), "method": "tk_wheel_offscreen",
+                          "technique": "molette hors écran (Tk)", "physical": False, "delta_y": delta_y,
+                          "verified": verified}  # fmt: skip
+                if how:
+                    result["verified_by"] = how
+                return result
+
     # 2. Molette par message en Win32/WinForms (recette commune du banc NexusWindows : premier plan intact), au point
     # donné ou au centre de l'élément visé.
     if (delta_y or delta_x) and win32_controls.family(target_hwnd) in win32_controls.MESSAGE_MOUSE_FAMILIES:
