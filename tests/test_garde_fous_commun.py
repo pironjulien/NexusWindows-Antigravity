@@ -38,6 +38,22 @@ def test_hard_block_unchanged_since_2_8_1():
     assert garde_fous.hard_block_reason("antigravity", "KeePassXC.exe")
 
 
+def test_invisible_characters_and_lookalikes_do_not_hide_a_word():
+    for label in ("Env\u200boyer", "En\u00advoyer", "\u0415nvoyer", "\u0420ayer", "Env\ufe0foyer"):
+        assert computer_client.irreversible_word(label), ascii(label)
+    # Titre de fenêtre qui donne le contexte (paiement) : même détection que le libellé (relecture de Codex du 27/10).
+    real = computer_client._window_title_raw
+    try:
+        for title in ("Paiem​ent", "Рaiement"):
+            computer_client._window_title_raw = lambda _hwnd, t=title: t
+            assert computer_client.confirm_word("OK", hwnd=1), ascii(title)
+            assert computer_client.outward_word("OK", hwnd=1), ascii(title)
+    finally:
+        computer_client._window_title_raw = real
+    # Identité (titre d'un document, texte attendu) : jamais de fusion de sosies (relecture de Codex du 27/10).
+    assert computer_client._plain("\u0440\u0430\u0443\u0440\u0430l.txt") != computer_client._plain("paypal.txt")
+
+
 def test_confirmation_words_unchanged():
     for label in ("Envoyer", "Payer", "Publier", "Supprimer définitivement", "Désinstaller", "Formater",
                   "Réinitialiser ce PC", "Résilier", "Rendre le dépôt public"):  # fmt: skip

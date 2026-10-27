@@ -9,6 +9,19 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.4.2] - 2026-10-27
+
+### Fixed
+- Guardrails: an invisible format character (zero-width space, soft hyphen, direction mark) or a Cyrillic or Greek
+  look-alike letter no longer lets a word that needs confirmation slip through ("Env\u200boyer" displays as
+  "Envoyer"), in the label as in the window title that gives the context (payment, formatting). Look-alikes count for
+  detection only, never to compare a document title or an expected text.
+
+### Security
+- CodeQL code scanning; release files (the wheel and sdist PyPI serves) attached to each GitHub release with a
+  Sigstore attestation and SHA256SUMS.txt (`gh attestation verify <file> --repo pironjulien/NexusWindows-Antigravity`);
+  SECURITY.md states response times and coordinated disclosure.
+
 ## [3.4.1] - 2026-10-27
 
 ### Fixed

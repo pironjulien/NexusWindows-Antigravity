@@ -527,7 +527,9 @@ BROWSER_NOTE = "Pour le web, nexus-browser est plus fiable."
 
 
 def _plain(text: Any) -> str:
-    """Texte comparable : sans accents ni casse, apostrophes et ponctuation ramenées à des espaces."""
+    """Texte comparable : sans accents ni casse, apostrophes et ponctuation ramenées à des espaces. Sert aussi
+    d'identité (titre d'un document, texte attendu) : jamais de fusion de sosies ici ; la détection des gestes à
+    confirmer passe par garde_fous.plain (relecture de Codex du 27/10)."""
     decomposed = unicodedata.normalize("NFKD", str(text or ""))
     bare = "".join(ch for ch in decomposed if not unicodedata.combining(ch)).casefold()
     return " ".join(re.sub(r"[^0-9a-z]+", " ", bare).split())
@@ -621,7 +623,7 @@ def irreversible_word(label: Any) -> str:
     « » sinon (liste vide : jamais)."""
     if not CONFIRM_PATTERNS:
         return ""
-    found = re.search(r"\b(" + "|".join(CONFIRM_PATTERNS) + r")\b", _plain(label))
+    found = re.search(r"\b(" + "|".join(CONFIRM_PATTERNS) + r")\b", garde_fous.plain(label))
     return found.group(0) if found else ""
 
 
@@ -646,8 +648,8 @@ def outward_word(label: Any, hwnd: int = 0) -> str:
     word = garde_fous.irreversible_word(label, garde_fous.outward_patterns())
     if word or not hwnd:
         return word
-    plain = _plain(label)
-    title = _window_title_plain(hwnd)
+    plain = garde_fous.plain(label)
+    title = _window_title_guard(hwnd)
     for context, verbs, what in CONTEXT_CONFIRM:
         if "paiement" not in what:
             continue
@@ -664,6 +666,12 @@ def _window_title_plain(hwnd: int) -> str:
     buf = ctypes.create_unicode_buffer(512)
     user32.GetWindowTextW(hwnd, buf, 512)
     return _plain(buf.value)
+
+
+def _window_title_guard(hwnd: int) -> str:
+    """Titre de la fenêtre normalisé pour la DÉTECTION des gestes à confirmer (garde_fous.plain : format et sosies),
+    jamais pour une identité (relecture de Codex du 27/10)."""
+    return garde_fous.plain(_window_title_raw(hwnd))
 
 
 def _window_title_raw(hwnd: int) -> str:
@@ -738,10 +746,10 @@ def confirm_word(label: Any, hwnd: int = 0) -> str:
     word = irreversible_word(label)
     if word or not hwnd or not CONFIRM_PATTERNS:
         return word
-    plain = _plain(label)
+    plain = garde_fous.plain(label)
     for context, verbs, what in CONTEXT_CONFIRM:
         found = re.search(r"\b(" + verbs + r")\b", plain)
-        if found and re.search(r"\b(" + context + r")\b", _window_title_plain(hwnd)):
+        if found and re.search(r"\b(" + context + r")\b", _window_title_guard(hwnd)):
             return f"{found.group(0)} (fenêtre de {what})"
     return ""
 
