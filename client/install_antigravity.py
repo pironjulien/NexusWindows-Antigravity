@@ -1,4 +1,4 @@
-"""Installation du plugin `nexus-computer` dans Antigravity (`~/.gemini/config/plugins/nexus-computer`), en une commande :
+"""Installation du plugin `nexus-windows` dans Antigravity (`~/.gemini/config/plugins/nexus-windows`), en une commande :
 
     uvx --python 3.14 nexus-windows-antigravity install      (depuis PyPI : aucun clone, ni PowerShell 7, ni Git)
 
@@ -6,9 +6,12 @@ Le plugin (guide de l'agent, manifeste) est copié depuis le paquet ou le clone 
 serveur une seule fois : `uvx --python 3.14 nexus-windows-antigravity@latest` (chemin absolu de uvx, pour un
 Antigravity déjà ouvert dont le PATH est ancien), ou, depuis un clone (`install.ps1`), le lanceur
 `scripts/start-computer-mcp.ps1`. Un plugin découvert est actif par défaut (documentation embarquée d'Antigravity :
-`config.json` ne garde qu'un choix explicite de l'utilisateur) : `config.json` n'est jamais écrit, un plugin que
-l'utilisateur a désactivé est seulement signalé. Les anciennes déclarations en double (entrée du `mcp_config.json`
-global, copie globale `skills/nexus-computer`) sont retirées ; les autres serveurs, plugins et clés restent intacts.
+`config.json` ne garde qu'un choix explicite de l'utilisateur) : `config.json` n'est écrit que pour reporter sous le
+nouveau nom un plugin désactivé sous l'ancien, un plugin que l'utilisateur a désactivé est seulement signalé. Les anciennes déclarations en double (entrée du `mcp_config.json`
+global, copie globale `skills/nexus-windows`) sont retirées ; les autres serveurs, plugins et clés restent intacts.
+Migration d'identité (28/10/2026) : le plugin s'appelait `nexus-computer` ; son dossier est vidé AVANT la pose du
+plugin `nexus-windows` (un échec laisse l'ancien seul, jamais deux serveurs du même moteur déclarés), sa copie globale
+`skills/nexus-computer` et son entrée globale sont retirées, et un « désactivé » choisi sous l'ancien nom est gardé.
 `--check` contrôle sans rien écrire ; `uninstall` retire le plugin. `--guide` (clone privé de Julien) installe son guide en
 français (`guide/SKILL.fr.md`, non exporté) à la place du guide public anglais."""
 
@@ -22,13 +25,26 @@ import sys
 import uuid
 from pathlib import Path
 
-PLUGIN = "nexus-computer"
+PLUGIN = "nexus-windows"
 PACKAGE = "nexus-windows-antigravity"
-# Anciennes déclarations globales du même serveur : celle de l'installeur d'avant le plugin, et celle que le README
-# faisait écrire à la main pour l'installation depuis PyPI (3.0 à 3.1.3).
-GLOBAL_DUPLICATES = (PLUGIN, PACKAGE)
+# Ancien nom du plugin (jusqu'au 28/10/2026), retiré à l'installation du nouveau.
+LEGACY_PLUGINS = ("nexus-computer",)
+# Anciennes déclarations globales du même serveur : celle de l'installeur d'avant le plugin (sous l'ancien nom et le
+# nouveau), et celle que le README faisait écrire à la main pour l'installation depuis PyPI (3.0 à 3.1.3).
+GLOBAL_DUPLICATES = (PLUGIN, *LEGACY_PLUGINS, PACKAGE)
 GUIDE = f"skills/{PLUGIN}/SKILL.md"
 HERE = Path(__file__).resolve().parent
+
+
+def remove_tree(folder: Path) -> None:
+    """Retire un dossier de plugin. Antigravity ouvert garde une poignée sur le dossier lui-même : vidé, il ne déclare
+    plus rien et part au passage suivant, Antigravity fermé. Un fichier verrouillé, lui, fait échouer."""
+    for file in (p for p in folder.rglob("*") if p.is_file()):
+        file.unlink()
+    try:
+        shutil.rmtree(folder)
+    except PermissionError:
+        pass
 
 
 class Drift(Exception):
@@ -40,7 +56,7 @@ def config_root() -> Path:
 
 
 def plugin_source() -> Path:
-    """Plugin livré : `plugin/` dans le paquet PyPI, `plugins/nexus-computer` dans un clone."""
+    """Plugin livré : `plugin/` dans le paquet PyPI, `plugins/nexus-windows` dans un clone."""
     for candidate in (HERE / "plugin", HERE.parent / "plugins" / PLUGIN):
         if (candidate / "plugin.json").is_file():
             return candidate
@@ -98,6 +114,20 @@ class Installer:
 
     def install(self, launcher: Path | None, guide: Path | None = None) -> None:
         source = plugin_source()
+        # 0. Ancien nom : un « désactivé » choisi par l'utilisateur est reporté sur le nouveau nom (sinon le nouveau
+        #    plugin, découvert, serait actif) ; puis l'ancien plugin est vidé, avant toute pose du nouveau : un échec
+        #    laisse l'ancien seul, jamais deux déclarations du même moteur.
+        self.carry_disabled_choice()
+        for name in LEGACY_PLUGINS:
+            legacy_plugin = self.root / "plugins" / name
+            if not legacy_plugin.is_dir():
+                continue
+            if any(p.is_file() for p in legacy_plugin.rglob("*")):
+                if self.check:
+                    raise Drift(f"former plugin still installed: {legacy_plugin}")
+                self.changes += 1
+            if not self.check:
+                remove_tree(legacy_plugin)
         # 1. Fichiers du plugin, copiés octet pour octet ; ceux que la version livrée n'a plus sont retirés.
         shipped = set()
         for file in sorted(source.rglob("*")):
@@ -134,11 +164,27 @@ class Installer:
                 for name in GLOBAL_DUPLICATES:
                     servers.pop(name, None)
                 self.write(global_mcp, (json.dumps(content, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
-        legacy_skill = self.root / "skills" / PLUGIN / "SKILL.md"
-        if legacy_skill.is_file():
-            self.remove(legacy_skill)
-            if not any(legacy_skill.parent.iterdir()):
-                legacy_skill.parent.rmdir()
+        for name in (PLUGIN, *LEGACY_PLUGINS):
+            legacy_skill = self.root / "skills" / name / "SKILL.md"
+            if legacy_skill.is_file():
+                self.remove(legacy_skill)
+                if not any(legacy_skill.parent.iterdir()):
+                    legacy_skill.parent.rmdir()
+
+    def carry_disabled_choice(self) -> None:
+        settings = self.root / "config.json"
+        try:
+            content = json.loads(settings.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        plugins = content.get("plugins") if isinstance(content, dict) else None
+        if not isinstance(plugins, dict) or PLUGIN in plugins:
+            return
+        if any(
+            isinstance(plugins.get(name), dict) and plugins[name].get("enabled") is False for name in LEGACY_PLUGINS
+        ):
+            plugins[PLUGIN] = {"enabled": False}
+            self.write(settings, (json.dumps(content, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
 
     def disabled_by_user(self) -> bool:
         settings = self.root / "config.json"
@@ -152,7 +198,7 @@ class Installer:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog=f"{PACKAGE} install",
-        description="Install the nexus-computer plugin (agent guide + MCP server) into Google Antigravity.",
+        description="Install the nexus-windows plugin (agent guide + MCP server) into Google Antigravity.",
     )
     parser.add_argument("action", choices=["install", "uninstall"])
     parser.add_argument("--check", action="store_true", help="check the installation without writing anything")
@@ -163,8 +209,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     installer = Installer(check=args.check)
     if args.action == "uninstall":
-        if installer.target.is_dir() and not args.check:
-            shutil.rmtree(installer.target)
+        if not args.check:
+            for folder in (installer.target, *(installer.root / "plugins" / name for name in LEGACY_PLUGINS)):
+                if folder.is_dir():
+                    remove_tree(folder)
         print(f"NexusWindows for Antigravity: plugin removed from {installer.target}. Restart Antigravity.")
         return 0
     try:

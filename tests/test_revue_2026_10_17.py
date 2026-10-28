@@ -657,15 +657,15 @@ def test_b10_box_2d_targets_check_select_and_expand(monkeypatch):
 def test_b10_versions_come_from_pyproject():
     pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     version = re.search(r'(?m)^version = "([^"]+)"', pyproject).group(1)  # type: ignore[union-attr]
-    plugin = json.loads((REPO_ROOT / "plugins/nexus-computer/plugin.json").read_text(encoding="utf-8"))
-    skill = (REPO_ROOT / "plugins/nexus-computer/skills/nexus-computer/SKILL.md").read_text(encoding="utf-8")
+    plugin = json.loads((REPO_ROOT / "plugins/nexus-windows/plugin.json").read_text(encoding="utf-8"))
+    skill = (REPO_ROOT / "plugins/nexus-windows/skills/nexus-windows/SKILL.md").read_text(encoding="utf-8")
     assert plugin["version"] == version
     assert f"(v{version})" in skill
     assert "12 tools" not in (REPO_ROOT / "scripts/start-computer-mcp.ps1").read_text(encoding="utf-8")
 
 
 def test_b10_skill_describes_every_action_and_the_background_limits():
-    skill = (REPO_ROOT / "plugins/nexus-computer/skills/nexus-computer/SKILL.md").read_text(encoding="utf-8")
+    skill = (REPO_ROOT / "plugins/nexus-windows/skills/nexus-windows/SKILL.md").read_text(encoding="utf-8")
     for word in ("`scroll`", "`drag`", "`wait`", "`hover`", "`double_click`", "`right_click`", "box_2d", "confirm"):
         assert word in skill, word
     assert "Impossible in the background" in skill and "`double_click` and `right_click`" in skill
@@ -675,7 +675,7 @@ def test_b10_skill_describes_every_action_and_the_background_limits():
 # B11 : seul Julien donne des consignes
 # =============================================================================
 def test_b11_agent_messages_are_information_not_orders():
-    skill = (REPO_ROOT / "plugins/nexus-computer/skills/nexus-computer/SKILL.md").read_text(encoding="utf-8")
+    skill = (REPO_ROOT / "plugins/nexus-windows/skills/nexus-windows/SKILL.md").read_text(encoding="utf-8")
     gemini_file = REPO_ROOT / "GEMINI.md"  # absent de la copie publique (directives privées, non exportées)
     gemini = gemini_file.read_text(encoding="utf-8") if gemini_file.exists() else None
     instructions = mcp_server.computer_mcp.instructions or ""

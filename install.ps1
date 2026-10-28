@@ -1,7 +1,7 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param([switch]$CheckOnly)
 # NexusWindows for Antigravity on this PC: Python environment outside the clone (%USERPROFILE%\.nexusagy\python),
-# then the nexus-computer plugin installed in Antigravity, pointed at this clone (client\install_antigravity.py).
+# then the nexus-windows plugin installed in Antigravity, pointed at this clone (client\install_antigravity.py).
 $ErrorActionPreference = "Stop"
 if ($CheckOnly) { & (Join-Path $PSScriptRoot "verify.ps1"); exit $LASTEXITCODE }
 if (-not $PSCmdlet.ShouldProcess("Ce PC", "Installer NexusWindows for Antigravity")) { return }

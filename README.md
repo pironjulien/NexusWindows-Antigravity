@@ -2,7 +2,7 @@
 
 <!-- mcp-name: io.github.pironjulien/nexus-windows-antigravity -->
 
-<img src="https://raw.githubusercontent.com/pironjulien/NexusWindows-Antigravity/main/plugins/nexus-computer/logo.png" alt="NexusWindows icon" width="96">
+<img src="https://raw.githubusercontent.com/pironjulien/NexusWindows-Antigravity/main/plugins/nexus-windows/logo.png" alt="NexusWindows icon" width="96">
 
 [![Release](https://img.shields.io/github/v/release/pironjulien/NexusWindows-Antigravity)](https://github.com/pironjulien/NexusWindows-Antigravity/releases)
 [![Tests](https://github.com/pironjulien/NexusWindows-Antigravity/actions/workflows/tests.yml/badge.svg)](https://github.com/pironjulien/NexusWindows-Antigravity/actions/workflows/tests.yml)
@@ -22,7 +22,7 @@ Antigravity (Gemini) see and operate Windows desktop applications while the user
 foreground window. Built for a fast model: one look, then one batch of steps with label targets, and every reply
 says what to do next.
 
-Version 3.5.1 · Windows 10/11 · Python 3.11+ · MIT licence
+Version 3.6.0 · Windows 10/11 · Python 3.11+ · MIT licence
 
 Part of the Nexus family: [NexusWindows](https://julienpiron.fr/nexuswindows/)
 ([Claude](https://github.com/pironjulien/NexusWindows-Claude) ·
@@ -71,13 +71,13 @@ manager, package `astral-sh.uv`), which brings Python 3.14 and the server from
 
    (uv already installed: `uvx --python 3.14 nexus-windows-antigravity@latest install` is enough.)
 
-3. Restart Antigravity. The `nexus-computer` plugin appears under **Customizations > Installed**, with its five tools
+3. Restart Antigravity. The `nexus-windows` plugin appears under **Customizations > Installed**, with its five tools
    and the agent guide. Ask for example: *"In Notepad, behind my window, type a shopping list and save it on the
    desktop."*
 
-What the `install` command does: it writes the `nexus-computer` plugin into
-`%USERPROFILE%\.gemini\config\plugins\nexus-computer`, the folder Antigravity loads plugins from: the agent guide
-([`SKILL.md`](https://github.com/pironjulien/NexusWindows-Antigravity/blob/main/plugins/nexus-computer/skills/nexus-computer/SKILL.md)),
+What the `install` command does: it writes the `nexus-windows` plugin into
+`%USERPROFILE%\.gemini\config\plugins\nexus-windows`, the folder Antigravity loads plugins from: the agent guide
+([`SKILL.md`](https://github.com/pironjulien/NexusWindows-Antigravity/blob/main/plugins/nexus-windows/skills/nexus-windows/SKILL.md)),
 the plugin manifest, and `mcp_config.json`, which declares the server once at its latest version
 (`uvx --python 3.14 nexus-windows-antigravity@latest`): each Antigravity start runs the newest published version. It
 removes an older manual declaration of the same server
@@ -219,7 +219,7 @@ tools; the lab is fixed and Electron will count at the next run. A comparison wi
 | `client/uia_fast.py`, `client/win32_controls.py` | One-round-trip UI Automation reads, native control messages |
 | `client/physical_input.py`, `client/agent_guard.py`, `client/emergency_stop.py` | The user's presence (Raw Input), batch guard, shared emergency stop |
 | `client/foreground_lock.py`, `client/garde_fous.py`, `client/garde-fous.json` | Shared foreground token and guard-rail policy, common to the author's desktop agents (also used by NexusWindows for Claude). Vendored in the public copy; in the author's setup they live in a sibling `commun` folder |
-| `plugins/nexus-computer/` | Antigravity plugin and the agent guide (`SKILL.md`), installed by `nexus-windows-antigravity install` (`client/install_antigravity.py`) |
+| `plugins/nexus-windows/` | Antigravity plugin and the agent guide (`SKILL.md`), installed by `nexus-windows-antigravity install` (`client/install_antigravity.py`) |
 | `tests/` | Unit tests (pytest) and the real desktop validation |
 
 ## Privacy

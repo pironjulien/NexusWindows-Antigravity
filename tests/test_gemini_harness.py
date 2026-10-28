@@ -417,7 +417,7 @@ def test_aliases_stay_callable_and_listed_by_the_full_server():
 
 def test_guides_are_short_imperative_and_in_sync():
     assert not (REPO_ROOT / "skills").exists()  # revue B12 : une seule copie de la compétence (le plugin)
-    skill = (REPO_ROOT / "plugins/nexus-computer/skills/nexus-computer/SKILL.md").read_text(encoding="utf-8")
+    skill = (REPO_ROOT / "plugins/nexus-windows/skills/nexus-windows/SKILL.md").read_text(encoding="utf-8")
     assert "GOLDEN RULE" in skill and "| Situation | Tool |" in skill
     assert len(skill.splitlines()) < 90
     # GEMINI.md ne porte plus la doc de l'outil : Julien l'a réservé aux règles souveraines (a4baed2, e0a4a4b, 20d4aa7).

@@ -417,5 +417,5 @@ def test_computer_tool_descriptions_say_token_is_automatic():
     assert "without reading the code" in act_doc
     assert "foreground=True" in act_doc and "shared token" in act_doc
     assert "jamais pour préparer" in (mcp_server.computer_focus_window.__doc__ or "")
-    skill = (REPO_ROOT / "plugins/nexus-computer/skills/nexus-computer/SKILL.md").read_text(encoding="utf-8")
+    skill = (REPO_ROOT / "plugins/nexus-windows/skills/nexus-windows/SKILL.md").read_text(encoding="utf-8")
     assert "without reading the code" in skill and "foreground.lock" in skill

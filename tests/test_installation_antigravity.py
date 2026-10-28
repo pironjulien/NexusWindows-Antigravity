@@ -1,4 +1,4 @@
-"""Installation of the nexus-computer plugin into Antigravity (client/install_antigravity.py, command
+"""Installation of the nexus-windows plugin into Antigravity (client/install_antigravity.py, command
 `nexus-windows-antigravity install`), on a fake profile (USERPROFILE redirected), never the real one."""
 
 import json
@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-PLUGIN_SOURCE = ROOT / "plugins/nexus-computer"
-SKILL = "skills/nexus-computer/SKILL.md"
+PLUGIN_SOURCE = ROOT / "plugins/nexus-windows"
+SKILL = "skills/nexus-windows/SKILL.md"
 
 
 def run(profile: Path, *args: str, check: bool = True):
@@ -49,14 +49,14 @@ def test_plugin_is_declared_once_and_config_json_never_written(tmp_path, monkeyp
     assert install_antigravity.main(["install"]) == 0
     assert install_antigravity.main(["install", "--check"]) == 0
     config = tmp_path / "pc/.gemini/config"
-    server = read_json(config / "plugins/nexus-computer/mcp_config.json")["mcpServers"]
-    assert list(server) == ["nexus-computer"]
-    assert Path(server["nexus-computer"]["command"]).stem.lower() == "uvx"
-    assert server["nexus-computer"]["args"] == ["--python", "3.14", "nexus-windows-antigravity@latest"]
-    assert server["nexus-computer"]["env"] == {"PYTHONUTF8": "1"}
+    server = read_json(config / "plugins/nexus-windows/mcp_config.json")["mcpServers"]
+    assert list(server) == ["nexus-windows"]
+    assert Path(server["nexus-windows"]["command"]).stem.lower() == "uvx"
+    assert server["nexus-windows"]["args"] == ["--python", "3.14", "nexus-windows-antigravity@latest"]
+    assert server["nexus-windows"]["env"] == {"PYTHONUTF8": "1"}
     assert not (config / "mcp_config.json").exists() and not (config / "config.json").exists()
-    assert (config / "plugins/nexus-computer" / SKILL).read_bytes() == (PLUGIN_SOURCE / SKILL).read_bytes()
-    assert read_json(config / "plugins/nexus-computer/plugin.json") == read_json(PLUGIN_SOURCE / "plugin.json")
+    assert (config / "plugins/nexus-windows" / SKILL).read_bytes() == (PLUGIN_SOURCE / SKILL).read_bytes()
+    assert read_json(config / "plugins/nexus-windows/plugin.json") == read_json(PLUGIN_SOURCE / "plugin.json")
 
 
 def test_clone_launcher_drift_and_obsolete_files_repaired_other_plugins_kept(tmp_path, launcher):
@@ -66,11 +66,11 @@ def test_clone_launcher_drift_and_obsolete_files_repaired_other_plugins_kept(tmp
     other.parent.mkdir(parents=True)
     other.write_text('{"name": "github"}', encoding="utf-8")
     run(profile, "install", "--launcher", str(launcher))
-    server = read_json(plugins / "nexus-computer/mcp_config.json")["mcpServers"]["nexus-computer"]
+    server = read_json(plugins / "nexus-windows/mcp_config.json")["mcpServers"]["nexus-windows"]
     assert server == {"command": "pwsh", "args": ["-NoProfile", "-File", str(launcher)]}
-    skill = plugins / "nexus-computer" / SKILL
+    skill = plugins / "nexus-windows" / SKILL
     skill.write_text("local edit", encoding="utf-8")
-    stale = plugins / "nexus-computer/hooks.json"  # e.g. the former Google guard copied into this plugin (2.6.0)
+    stale = plugins / "nexus-windows/hooks.json"  # e.g. the former Google guard copied into this plugin (2.6.0)
     stale.write_text('{"garde-google-mutate": {}}', encoding="utf-8")
     assert run(profile, "install", "--check", "--launcher", str(launcher), check=False).returncode == 1
     run(profile, "install", "--launcher", str(launcher))
@@ -93,20 +93,24 @@ def test_former_duplicate_declarations_are_removed_and_others_kept(tmp_path, lau
     original = {
         "mcpServers": {
             "nexus-browser": others["nexus-browser"],
-            "nexus-computer": {"command": "pwsh", "args": ["-NoProfile", "-File", "ancien.ps1"]},
+            "nexus-windows": {"command": "pwsh", "args": ["-NoProfile", "-File", "ancien.ps1"]},
+            "nexus-computer": {"command": "pwsh", "args": ["-NoProfile", "-File", "ancien-nom.ps1"]},
             "nexus-windows-antigravity": {"command": "uvx", "args": ["nexus-windows-antigravity"]},
             "nexus-android": others["nexus-android"],
         },
         "custom": {"keep": True},
     }
     (config / "mcp_config.json").write_text(json.dumps(original), encoding="utf-8")
-    legacy_skill = config / "skills/nexus-computer/SKILL.md"
+    legacy_skill = config / "skills/nexus-windows/SKILL.md"
     legacy_skill.parent.mkdir(parents=True)
     legacy_skill.write_text("ancienne copie", encoding="utf-8")
+    former_name_skill = config / "skills/nexus-computer/SKILL.md"
+    former_name_skill.parent.mkdir(parents=True)
+    former_name_skill.write_text("ancienne copie sous l'ancien nom", encoding="utf-8")
     browser_skill = config / "skills/nexus-browser/SKILL.md"
     browser_skill.parent.mkdir(parents=True)
     browser_skill.write_text("compétence de NexusBrowser", encoding="utf-8")
-    settings = {"userSettings": {"keep": 1}, "plugins": {"nexus-computer": {"enabled": False}}}
+    settings = {"userSettings": {"keep": 1}, "plugins": {"nexus-windows": {"enabled": False}}}
     (config / "config.json").write_text(json.dumps(settings), encoding="utf-8")
 
     result = run(profile, "install", "--launcher", str(launcher))
@@ -115,10 +119,74 @@ def test_former_duplicate_declarations_are_removed_and_others_kept(tmp_path, lau
     assert list(merged["mcpServers"]) == ["nexus-browser", "nexus-android"]
     assert merged["mcpServers"] == others and merged["custom"] == {"keep": True}
     assert not legacy_skill.exists() and not legacy_skill.parent.exists()
+    assert not former_name_skill.exists() and not former_name_skill.parent.exists()
     assert browser_skill.read_text(encoding="utf-8") == "compétence de NexusBrowser"
     # The user's own choice is kept and reported, never overwritten.
     assert read_json(config / "config.json") == settings
     assert "turned off" in result.stdout
+
+
+def test_former_nexus_computer_plugin_is_replaced_never_two_active(tmp_path, launcher):
+    """Identity migration (28/10/2026): the plugin was called nexus-computer. Installing nexus-windows removes the whole
+    former folder (its own server declaration and guide), so Antigravity never loads two copies of the engine; --check
+    reports a former folder still present."""
+    profile = tmp_path / "pc"
+    plugins = profile / ".gemini/config/plugins"
+    former = plugins / "nexus-computer"
+    (former / "skills/nexus-computer").mkdir(parents=True)
+    (former / "plugin.json").write_text('{"name": "nexus-computer"}', encoding="utf-8")
+    (former / "mcp_config.json").write_text('{"mcpServers": {"nexus-computer": {"command": "pwsh"}}}', encoding="utf-8")
+    (former / "skills/nexus-computer/SKILL.md").write_text("ancien guide", encoding="utf-8")
+    assert run(profile, "install", "--check", "--launcher", str(launcher), check=False).returncode == 1
+    run(profile, "install", "--launcher", str(launcher))
+    run(profile, "install", "--check", "--launcher", str(launcher))
+    assert not former.exists()
+    assert sorted(p.name for p in plugins.iterdir()) == ["nexus-windows"]
+    assert list(read_json(plugins / "nexus-windows/mcp_config.json")["mcpServers"]) == ["nexus-windows"]
+    (former / "skills").mkdir(parents=True)  # empty folders: nothing declared (Antigravity may still hold them)
+    run(profile, "install", "--check", "--launcher", str(launcher))
+    (former / "plugin.json").write_text("{}", encoding="utf-8")
+    assert run(profile, "install", "--check", "--launcher", str(launcher), check=False).returncode == 1
+
+
+def test_locked_former_plugin_file_fails_before_the_new_plugin_is_declared(tmp_path, launcher):
+    """A former file that cannot be removed (held open) stops the installation before nexus-windows is declared: the
+    former plugin stays alone, never two declarations of the engine; once released, installing again completes."""
+    profile = tmp_path / "pc"
+    former = profile / ".gemini/config/plugins/nexus-computer"
+    former.mkdir(parents=True)
+    declaration = former / "mcp_config.json"
+    declaration.write_text('{"mcpServers": {"nexus-computer": {"command": "pwsh"}}}', encoding="utf-8")
+    with declaration.open("rb"):  # Windows: an open file without FILE_SHARE_DELETE cannot be deleted
+        assert run(profile, "install", "--launcher", str(launcher), check=False).returncode != 0
+        assert not (profile / ".gemini/config/plugins/nexus-windows/mcp_config.json").exists()
+    run(profile, "install", "--launcher", str(launcher))
+    assert not former.exists()
+
+
+def test_former_name_turned_off_stays_off_under_the_new_name(tmp_path, launcher):
+    """A user who turned nexus-computer off keeps it off: the choice is carried to nexus-windows before the new plugin
+    is laid down (a discovered plugin is on by default), the other settings untouched, and reported."""
+    profile = tmp_path / "pc"
+    config = profile / ".gemini/config"
+    config.mkdir(parents=True)
+    settings = {
+        "userSettings": {"keep": 1},
+        "plugins": {"nexus-computer": {"enabled": False}, "github": {"enabled": True}},
+    }
+    (config / "config.json").write_text(json.dumps(settings), encoding="utf-8")
+    assert run(profile, "install", "--check", "--launcher", str(launcher), check=False).returncode == 1
+    result = run(profile, "install", "--launcher", str(launcher))
+    plugins = read_json(config / "config.json")["plugins"]
+    assert plugins["nexus-windows"] == {"enabled": False} and plugins["github"] == {"enabled": True}
+    assert read_json(config / "config.json")["userSettings"] == {"keep": 1}
+    assert "turned off" in result.stdout
+    run(profile, "install", "--check", "--launcher", str(launcher))
+    # An explicit choice under the new name always wins.
+    plugins["nexus-windows"] = {"enabled": True}
+    (config / "config.json").write_text(json.dumps({"plugins": plugins}), encoding="utf-8")
+    run(profile, "install", "--launcher", str(launcher))
+    assert read_json(config / "config.json")["plugins"]["nexus-windows"] == {"enabled": True}
 
 
 def test_uninstall_removes_the_plugin_only(tmp_path, launcher):
@@ -128,7 +196,7 @@ def test_uninstall_removes_the_plugin_only(tmp_path, launcher):
     other.parent.mkdir(parents=True)
     other.write_text("{}", encoding="utf-8")
     run(profile, "uninstall")
-    assert not (profile / ".gemini/config/plugins/nexus-computer").exists()
+    assert not (profile / ".gemini/config/plugins/nexus-windows").exists()
     assert other.exists()
 
 
@@ -137,9 +205,9 @@ def test_guide_option_installs_another_agent_guide_and_check_follows_it(tmp_path
     shipped English guide, and --check compares against it."""
     profile = tmp_path / "pc"
     guide = tmp_path / "SKILL.fr.md"
-    guide.write_text("---\nname: nexus-computer\n---\n# Guide\n", encoding="utf-8")
+    guide.write_text("---\nname: nexus-windows\n---\n# Guide\n", encoding="utf-8")
     run(profile, "install", "--launcher", str(launcher), "--guide", str(guide))
-    skill = profile / ".gemini/config/plugins/nexus-computer" / SKILL
+    skill = profile / ".gemini/config/plugins/nexus-windows" / SKILL
     assert skill.read_bytes() == guide.read_bytes()
     run(profile, "install", "--check", "--launcher", str(launcher), "--guide", str(guide))
     assert run(profile, "install", "--check", "--launcher", str(launcher), check=False).returncode == 1

@@ -1,9 +1,9 @@
 ---
-name: nexus-computer
+name: nexus-windows
 description: Drive the Windows desktop and its applications in the background (look, then act in one batch, targets by label; every answer says what to do next).
 ---
 
-# NexusWindows for Antigravity (v3.5.1)
+# NexusWindows for Antigravity (v3.6.0)
 
 **GOLDEN RULE: `look` → `act` in ONE batch with targets by label; never resend a batch without looking.**
 

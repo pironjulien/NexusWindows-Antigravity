@@ -330,7 +330,7 @@ def test_confirm_list_is_third_party_money_or_irreversible():
 
 def test_confirm_off_is_documented():
     # GEMINI.md réservé par Julien aux règles souveraines (a4baed2, e0a4a4b, 20d4aa7) : la doc vit dans ces deux fichiers.
-    for rel in ("README.md", "plugins/nexus-computer/skills/nexus-computer/SKILL.md"):
+    for rel in ("README.md", "plugins/nexus-windows/skills/nexus-windows/SKILL.md"):
         assert "NEXUS_AGY_CONFIRM=off" in (REPO_ROOT / rel).read_text(encoding="utf-8"), rel
 
 

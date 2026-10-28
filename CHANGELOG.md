@@ -9,6 +9,14 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.6.0] - 2026-10-28
+
+### Changed
+- The Antigravity plugin is renamed `nexus-computer` → `nexus-windows` (folder, MCP server, skill). Running the
+  `install` command again empties the former `nexus-computer` plugin before laying down the new one, so the server is
+  never declared twice; a plugin you had turned off under the former name stays off. An installation that keeps the
+  former name keeps working (its server still updates itself at each start) until `install` is run again.
+
 ## [3.5.1] - 2026-10-28
 
 ### Fixed
