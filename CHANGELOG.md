@@ -9,6 +9,23 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-10-28
+
+### Added
+- `launch` and `computer_open_path` accept arguments (`args`, or after the program in `app`): "EditeurTest.exe
+  C:\x\y.txt" opens the document instead of being refused; an existing path with spaces is never split; arguments are
+  refused for a document or a folder, and switches are refused for a Chromium/Electron application.
+
+### Fixed
+- `menu`: the direct command of a classic Windows menu is also used for a WinForms menu bar; "…" and "...", and "&"
+  accelerators, are matched; elsewhere each level is opened (Expand, else Invoke), the next item is read back in the
+  popup menu, and opened levels are closed again if the path fails ("File > Save as…" used to fail unless the root
+  menu was already open).
+- Typing (`type`, `set`, `clear`) aimed at an editable combo box goes to its edit field, even when the combo box is
+  targeted by number or is the only element with that name ("File name:").
+- A shortcut sent with no effect read back (Paint and other WinUI interfaces) stays "unknown", with a message pointing
+  to the command's button or menu.
+
 ## [3.4.3] - 2026-10-27
 
 ### Fixed

@@ -535,23 +535,33 @@ def menu_items(top: int) -> list[tuple[str, int]]:
     return out
 
 
+def menu_key(label: str) -> str:
+    """Entrée de menu comparable sans accélérateur ni points de suspension finaux (« ... » ou « … ») : « Enregistrer
+    sous… » demandé trouve « Enregistrer &sous... » (banc du 28/10)."""
+    return " ".join(label.replace("&", "").split()).rstrip(".…").strip().casefold()
+
+
 def menu_command(top: int, path: str) -> str:
-    """Commande de menu par son chemin (« Fichier > Enregistrer » ou dernier libellé seul) : WM_COMMAND au cadre."""
+    """Commande de menu par son chemin (« Fichier > Enregistrer » ou dernier libellé seul) : WM_COMMAND au cadre.
+    Correspondance exacte d'abord (casse et espaces ignorés), puis sans accélérateur ni points de suspension, seulement
+    si elle est unique (« Exécuter » et « Exécuter... » gardent chacun la leur)."""
     items = menu_items(top)
     if not items:
         raise MessageError("Pas de barre de menus Win32.")
-    wanted = [p.strip().lower() for p in path.replace("/", ">").split(">") if p.strip()]
-    matches = []
-    for label, ident in items:
-        parts = [p.strip().lower() for p in label.split(">")]
-        if parts[-len(wanted) :] == wanted:
-            matches.append((label, ident))
-    if len(matches) > 1:
-        raise MessageError(f"Menu « {path} » ambigu : {', '.join(m[0] for m in matches[:6])}.")
-    if not matches:
-        raise MessageError(f"Commande de menu « {path} » introuvable.")
-    post(top, WM_COMMAND, matches[0][1] & 0xFFFF, 0)
-    return "wm_command_menu"
+    raw = [p for p in path.replace("/", ">").split(">") if p.strip()]
+    if not raw:
+        raise MessageError("Chemin de menu vide.")
+    for key in (lambda text: " ".join(text.split()).casefold(), menu_key):
+        wanted = [key(p) for p in raw]
+        matches = [
+            (label, ident) for label, ident in items if [key(p) for p in label.split(">")][-len(wanted) :] == wanted
+        ]
+        if len(matches) > 1:
+            raise MessageError(f"Menu « {path} » ambigu : {', '.join(m[0] for m in matches[:6])}.")
+        if matches:
+            post(top, WM_COMMAND, matches[0][1] & 0xFFFF, 0)
+            return "wm_command_menu"
+    raise MessageError(f"Commande de menu « {path} » introuvable.")
 
 
 # --- Clavier par messages (fenêtre en arrière-plan, sans activation) -----------------------------------------

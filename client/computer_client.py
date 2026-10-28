@@ -2115,15 +2115,16 @@ def chromium_launch_target(path: str) -> str:
     return path if path and Path(path).is_file() and is_chromium_app(path) else ""
 
 
-def _start_chromium(exe: str) -> None:
-    """Démarre l'exécutable sans activation demandée, avec le suivi d'occlusion coupé et l'accessibilité forcée."""
+def _start_chromium(exe: str, args: list[str] | None = None) -> None:
+    """Démarre l'exécutable sans activation demandée, avec le suivi d'occlusion coupé et l'accessibilité forcée ;
+    `args` (fichiers à ouvrir, jamais un commutateur : _args_problem) après les commutateurs de l'outil."""
     import subprocess
 
     info = subprocess.STARTUPINFO()
     info.dwFlags |= STARTF_USESHOWWINDOW
     info.wShowWindow = SW_SHOWNOACTIVATE
-    subprocess.Popen(  # noqa: S603 - chemin vérifié par _path_problem, aucun argument venu du modèle
-        [exe, f"--disable-features={CHROMIUM_OCCLUSION_FEATURE}", CHROMIUM_A11Y_SWITCH],
+    subprocess.Popen(  # noqa: S603 - chemin vérifié par _path_problem, arguments du modèle par _args_problem
+        [exe, f"--disable-features={CHROMIUM_OCCLUSION_FEATURE}", CHROMIUM_A11Y_SWITCH, *(args or [])],
         cwd=str(Path(exe).parent), startupinfo=info, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL, close_fds=True,
     )  # fmt: skip
@@ -2198,9 +2199,73 @@ def _path_problem(path: str) -> str:
     return ""
 
 
-def open_path(path_or_url: str) -> dict[str, Any]:
+def split_command_args(args: str) -> list[str]:
+    """Arguments découpés comme Windows les découpe (CommandLineToArgvW) : guillemets, espaces et barres obliques
+    inverses selon les règles du programme lancé."""
+    if not str(args or "").strip():
+        return []
+    shell32 = ctypes.WinDLL("shell32")
+    shell32.CommandLineToArgvW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_int)]
+    shell32.CommandLineToArgvW.restype = ctypes.POINTER(wintypes.LPWSTR)
+    local_free = ctypes.WinDLL("kernel32").LocalFree
+    local_free.argtypes = [ctypes.c_void_p]
+    count = ctypes.c_int(0)
+    argv = shell32.CommandLineToArgvW(f"x {args}", ctypes.byref(count))  # « x » : nom de programme, règles à part
+    if not argv:
+        raise ValueError(f"Arguments illisibles : « {args} ».")
+    try:
+        return [str(argv[i]) for i in range(1, count.value)]
+    finally:
+        local_free(ctypes.cast(argv, ctypes.c_void_p))
+
+
+def _expand_path(text: str) -> str:
+    return os.path.expandvars(os.path.expanduser(text))
+
+
+def _split_launch(raw: str) -> tuple[str, str]:
+    """(chemin, arguments) d'une chaîne de lancement. Chaîne entière d'abord : un chemin existant avec espaces
+    (« C:\\Program Files\\App\\app.exe ») ou un protocole n'est jamais coupé. Sinon : programme entre guillemets suivi
+    d'arguments, ou plus court préfixe (coupé à une espace) qui désigne un programme .exe existant, le reste en
+    arguments (banc du 28/10 : « EditeurTest.exe C:\\x\\y.txt » refusé, chaîne entière passée à os.path.exists)."""
+    raw = raw.strip()
+    whole = _resolve_program(_expand_path(raw.strip('"')))
+    if not raw or Path(whole).exists() or _is_protocol(whole) or re.match(r"^[a-z][a-z0-9+.-]*://", whole, re.I):
+        return whole, ""
+    if raw.startswith('"'):
+        end = raw.find('"', 1)
+        if 0 < end < len(raw) - 1:
+            return _resolve_program(_expand_path(raw[1:end])), raw[end + 1 :].strip()
+        return whole, ""
+    for match in re.finditer(r"\s+", raw):
+        head = _resolve_program(_expand_path(raw[: match.start()]))
+        if Path(head).suffix.lower() == ".exe" and Path(head).is_file():
+            return head, raw[match.end() :].strip()
+    return whole, ""
+
+
+def _args_problem(target: Path, args: str, chromium: bool) -> str:
+    """Raison de refuser des arguments (« » sinon) : seulement pour un programme .exe ; pour Chromium/Electron, des
+    fichiers ou des mots, jamais un commutateur (port DevTools, profil… ouvriraient les sessions de Julien à un canal
+    de contrôle ; les commutateurs de l'outil restent les siens)."""
+    if target.suffix.lower() != ".exe":
+        return "des arguments ne s'ajoutent qu'à un programme .exe (un document ou un dossier s'ouvre seul)"
+    if chromium:
+        switch = next((a for a in split_command_args(args) if a[:1] in ("-", "/")), None)
+        if switch is not None:
+            return (
+                f"commutateur « {switch} » refusé pour une application Chromium/Electron (canal de contrôle ou "
+                "profil de Julien) : seulement des fichiers en arguments"
+            )
+    return ""
+
+
+def open_path(path_or_url: str, args: str = "") -> dict[str, Any]:
     """Ouvre un chemin existant (document, dossier, programme, script, raccourci) comme un double-clic
     (ShellExecute). Refus : URL et protocoles (pages web : nexus-browser), chemins de périphérique, chemin introuvable.
+
+    Arguments d'un programme .exe : `args`, ou à la suite du chemin dans la même chaîne (« notepad.exe C:\\x.txt »,
+    « "C:\\Mon dossier\\app.exe" C:\\x.txt ») ; un chemin existant avec espaces n'est jamais coupé.
 
     Ouverture relue : NOUVELLE fenêtre de l'application associée (AssocQueryString ; le programme lui-même pour un
     .exe) ou portant le nom du fichier ; sinon (Windows 11 à onglets : document ajouté comme onglet) fenêtre déjà ouverte de l'application
@@ -2209,13 +2274,22 @@ def open_path(path_or_url: str) -> dict[str, Any]:
     prend : la fenêtre ouverte reste en arrière-plan, une étape foreground=True la ramène elle-même devant."""
     emergency_stop.check()
     ensure_default_desktop()
-    path_expanded = os.path.expandvars(os.path.expanduser(str(path_or_url or "").strip().strip('"')))
-    path_expanded = _resolve_program(path_expanded)
+    path_expanded, inline_args = _split_launch(str(path_or_url or ""))
+    args = " ".join(part for part in (inline_args, str(args or "").strip()) if part)
     problem = _path_problem(path_expanded)
     if problem:
         raise PermissionError(f"Ouverture refusée de « {path_or_url} » : {problem}. Rien n'a été ouvert.")
     target = Path(path_expanded)
     chromium = chromium_launch_target(path_expanded)
+    if args:
+        problem = _args_problem(target, args, bool(chromium))
+        if problem:
+            raise PermissionError(f"Ouverture refusée de « {path_or_url} » : {problem}. Rien n'a été ouvert.")
+    # Nom relu dans le titre : celui du document passé en argument s'il y en a un (onglet ajouté à une fenêtre ouverte).
+    # Arguments entiers d'abord : un chemin avec espaces non mis entre guillemets reste un seul document.
+    candidates = [args.strip().strip('"'), *reversed(split_command_args(args))] if args else []
+    document = next((arg for arg in candidates if Path(_expand_path(arg)).is_file()), "")
+    named = Path(document).name if document else target.name
     app = (
         Path(chromium).name.lower()
         if chromium
@@ -2228,12 +2302,14 @@ def open_path(path_or_url: str) -> dict[str, Any]:
     store_app = "" if chromium or app else _packaged_handler(path_expanded)
     store_pid = 0
     if chromium:
-        _start_chromium(chromium)
+        _start_chromium(chromium, split_command_args(args))
     elif store_app:
         try:  # ShellExecute d'un document Store lancé sans premier plan peut ne rien ouvrir (constat Claude, 26/10)
             store_pid = _activate_for_file(store_app, path_expanded)
         except Exception:  # noqa: BLE001 - pas de contrat d'ouverture de fichiers : le shell prend le relais
             os.startfile(path_expanded)
+    elif args:
+        os.startfile(path_expanded, arguments=args)
     else:
         os.startfile(path_expanded)
     seen: dict[str, Any] | None = None
@@ -2245,13 +2321,13 @@ def open_path(path_or_url: str) -> dict[str, Any]:
         windows = list_windows(visible_only=True)
         for w in windows:  # 1. nouvelle fenêtre : de l'application associée, ou portant le nom du fichier
             of_app = bool(app) and str(w.get("process_name") or "").lower() == app
-            if w["hwnd"] not in before and (of_app or _title_names_file(w.get("title"), target.name)):
+            if w["hwnd"] not in before and (of_app or _title_names_file(w.get("title"), named)):
                 seen, verified_by = w, "nouvelle fenêtre de l'ouverture relue"
                 break
         if seen is None and app:  # 2. onglet ajouté à une fenêtre déjà ouverte de l'application associée
             for w in windows:
                 of_app = str(w.get("process_name") or "").lower() == app
-                if w["hwnd"] in before and of_app and _title_names_file(w.get("title"), target.name):
+                if w["hwnd"] in before and of_app and _title_names_file(w.get("title"), named):
                     seen, verified_by = w, "fenêtre de l'application associée portant le nom (onglet)"
                     break
         if seen is None and store_pid:  # 3. application Store : arbre du pid activé, nom du document lu dans l'arbre
@@ -2260,6 +2336,8 @@ def open_path(path_or_url: str) -> dict[str, Any]:
             )
     stolen = _give_back_after_open(seen, front_before)
     result: dict[str, Any] = {"success": True if seen else None, "verified": bool(seen) or None, "path": path_expanded}
+    if args:
+        result["arguments"] = args
     if app or store_app:
         result["application"] = app or store_app
     if chromium:
@@ -4530,6 +4608,11 @@ def type_text(
         ctrl = get_cached_element(element_index, target_hwnd)
         info = _element_info.get(element_index, {}) if _cached_window_hwnd == target_hwnd else {}
         source = "element_index"
+        field = _combo_edit_field(element_index, ctrl, info, target_hwnd)
+        if field is not None:
+            combo_index = element_index
+            ctrl, info, element_index = field
+            source = f"champ Edit de la liste déroulante modifiable [{combo_index}]"
     elif box_2d is not None or (x is not None and y is not None):
         sx, sy, _aim = _aim_point(target_hwnd, target_hwnd, x, y, box_2d, "window")
         point = (sx, sy)
@@ -4967,6 +5050,14 @@ def _background_keys(
                                     "technique": "raccourci par messages", "keys": keys, "sent": True}  # fmt: skip
         if how:
             shortcut["verified_by"] = how
+        if verified is None:
+            # Contenu WinUI/XAML dans un cadre Win32 (Paint, banc du 28/10) : raccourci posté ignoré. Inconnu, jamais
+            # « fait » ; la commande se donne par son bouton ou son menu (UIA), pas en renvoyant le raccourci.
+            shortcut["message"] = (
+                f"~ raccourci « {keys} » envoyé sans effet relu (une interface WinUI/XAML, comme Paint, ignore les "
+                "raccourcis postés) : ne pas le renvoyer ; viser plutôt le bouton ou le menu de la commande (click, "
+                "menu), après un look."
+            )
         return shortcut
     if mods or len(main) != 1 or fam not in KEY_MESSAGE_FAMILIES:
         return None
@@ -5963,6 +6054,49 @@ def select_option(
     return result
 
 
+MENU_OPEN_WAIT_S = 1.5  # entrée suivante attendue dans le menu surgi (même borne que nexus-windows pour Claude)
+
+
+def _wait_menu_item(hwnds: Callable[[], list[int]], label: str, timeout: float) -> Any:
+    """Entrée `label` relue jusqu'à son apparition (menu surgi qui se dessine après l'ouverture), bornée par timeout ;
+    None si elle n'est pas venue. Les fenêtres sont relues à chaque tour (le menu surgi est une nouvelle fenêtre)."""
+    deadline = time.monotonic() + timeout
+    while True:
+        _checkpoint()
+        item = _find_menu_item(hwnds(), label)
+        if item is not None or time.monotonic() >= deadline:
+            return item
+        time.sleep(EFFECT_POLL_S)
+
+
+def _open_menu_level(item: Any) -> str:
+    """Ouvre un niveau de menu : Expand, sinon Invoke (barre WinUI, MenuStrip sans motif ExpandCollapse, ou Expand
+    refusé « état courant »). Rend la technique qui a ouvert, ou « pending » (Invoke sans réponse : issue inconnue)."""
+    errors: list[str] = []
+    expand = item.GetExpandCollapsePattern()
+    if expand:
+        try:
+            expand.Expand()
+            return "UIA Expand"
+        except Exception as error:  # noqa: BLE001 - Expand refusé : Invoke ensuite
+            errors.append(f"Expand : {type(error).__name__}: {error}")
+    if item.GetInvokePattern():
+        return "pending" if _invoke_with_timeout(item) == "pending" else "UIA Invoke"
+    raise LookupError("ni Expand ni Invoke" + (f" ({'; '.join(errors)})" if errors else ""))
+
+
+def _close_menu_levels(opened: list[Any]) -> None:
+    """Niveaux ouverts par un chemin qui a échoué : repliés du plus profond au premier (jamais un menu laissé ouvert
+    au-dessus des fenêtres de Julien). Sans motif ExpandCollapse, rien n'est renvoyé (un Invoke le rouvrirait)."""
+    for item in reversed(opened):
+        try:
+            pattern = item.GetExpandCollapsePattern()
+            if pattern:
+                pattern.Collapse()
+        except Exception:  # noqa: BLE001 - menu déjà refermé
+            pass
+
+
 def _find_menu_item(hwnds: list[int], label: str) -> Any:
     """Élément MenuItem nommé `label` dans les fenêtres données (fenêtre cible puis menus surgissants) : même règle
     que les cibles d'act (exact unique, sinon partiel unique en mots entiers ; ambiguïté refusée avec la liste)."""
@@ -5993,9 +6127,10 @@ def menu_command(
     """Commande de menu par son chemin (« Fichier > Enregistrer ») ; commande au libellé de CONFIRM_PATTERNS (Envoyer,
     Publier…) : confirm=true exigé (et accord si action sortante).
 
-    Win32 (barre HMENU) : WM_COMMAND avec l'identifiant de l'élément, sans ouvrir le menu. Sinon UIA : chaque niveau
-    ouvert (Expand) puis le dernier invoqué. Effet relu sur la fenêtre (titre, fenêtres, image) ; `expect` d'act pour
-    une postcondition précise."""
+    Barre HMENU (Win32, mais aussi MainMenu WinForms, MFC…) : WM_COMMAND avec l'identifiant de l'élément, sans ouvrir
+    le menu. Sinon UIA, élément par élément : chaque niveau ouvert (Expand, sinon Invoke), l'entrée suivante relue dans
+    le menu surgi jusqu'à son apparition, puis la dernière invoquée ; niveaux repliés si le chemin échoue. Effet relu
+    sur la fenêtre (titre, fenêtres, image) ; `expect` d'act pour une postcondition précise."""
     t0 = time.perf_counter()
     emergency_stop.check()
     target_hwnd = resolve_window(hwnd)
@@ -6014,25 +6149,37 @@ def menu_command(
         if uia_fast is None:
             raise RuntimeError("UI Automation indisponible.")
         pid = _window_pid(target_hwnd)
-        for i, label in enumerate(segments):
-            _checkpoint()
-            item = _find_menu_item([target_hwnd, *[h for h in _process_windows(pid) if h != target_hwnd]], label)
-            if item is None:
-                raise LookupError(f"Élément de menu « {label} » introuvable.")
-            last = i == len(segments) - 1
-            expand = item.GetExpandCollapsePattern() if not last else None
-            if expand:
-                expand.Expand()
-                time.sleep(0.12)
-            else:
-                if _invoke_with_timeout(item) == "pending":
-                    return "pending"
-                if not last:
-                    time.sleep(0.12)
+
+        def popups() -> list[int]:
+            return [h for h in _process_windows(pid) if h != target_hwnd]
+
+        def popups_first() -> list[int]:
+            # Niveau suivant : cherché d'abord dans le menu surgi (autres fenêtres du processus), puis la fenêtre.
+            return [*popups(), target_hwnd]
+
+        opened: list[Any] = []
+        try:
+            for i, label in enumerate(segments):
+                if i == 0:
+                    _checkpoint()
+                    item = _find_menu_item([target_hwnd, *popups()], label)
+                else:
+                    item = _wait_menu_item(popups_first, label, MENU_OPEN_WAIT_S)
+                if item is None:
+                    where = f" dans le menu ouvert « {segments[i - 1]} »" if i else ""
+                    raise LookupError(f"Élément de menu « {label} » introuvable{where}.")
+                if i == len(segments) - 1:
+                    return "pending" if _invoke_with_timeout(item) == "pending" else "uia"
+                if _open_menu_level(item) == "pending":
+                    return "pending"  # issue inconnue : jamais de niveau suivant ni de repli par-dessus
+                opened.append(item)
+        except BaseException:
+            _close_menu_levels(opened)
+            raise
         return "uia"
 
     chain: list[tuple[str, Callable[[], Any]]] = []
-    if fam == "Win32" and win32_controls.menu_items(target_hwnd):
+    if win32_controls.menu_items(target_hwnd):
         chain.append(("WM_COMMAND menu", lambda: win32_controls.menu_command(target_hwnd, path)))
     chain.append(("UIA menu", uia_menu))
     before = window_fingerprint(target_hwnd)
@@ -6411,6 +6558,59 @@ def _combo_of_edit(idx: int) -> int | None:
     if parent is None:
         return None
     return next((i for i, info in _element_info.items() if info.get("tree_index") == parent), None)
+
+
+def _combo_edit_child(ctrl: Any) -> Any:
+    """Champ Edit d'une liste déroulante modifiable, relu dans ses enfants UIA : enfant direct, ou enfant d'une
+    ComboBox imbriquée (ComboBoxEx32 > ComboBox > Edit des boîtes Win32). None si la liste n'est pas modifiable."""
+    level = [ctrl]
+    while level:
+        nested: list[Any] = []
+        for node in level:
+            try:
+                children = node.GetChildren() or []
+            except Exception:  # noqa: BLE001 - élément disparu : pas de champ
+                continue
+            for child in children:
+                kind = str(getattr(child, "ControlTypeName", "") or "")
+                if kind == "EditControl":
+                    return child
+                if kind == "ComboBoxControl":
+                    nested.append(child)
+        level = nested
+    return None
+
+
+def _combo_edit_field(
+    element_index: int, ctrl: Any, info: dict[str, Any], target_hwnd: int
+) -> tuple[Any, dict[str, Any], int] | None:
+    """Saisie visée sur une ComboBox modifiable : (contrôle, infos, index) de SON champ Edit, sinon None. Le texte va
+    toujours au champ : UIA Value d'une ComboBox Win32 reste sans effet (banc du 28/10, « Nom du fichier : » refusé).
+    Le correctif du 22/10 (choose_label) ne départage que si l'Edit porte le même nom que la ComboBox et figure dans la
+    même lecture ; ici, la ComboBox désignée par [N], seule de son nom ou après une liste tronquée, mène aussi au champ."""
+    if str(info.get("type") or "") != "ComboBox":
+        return None
+    tree_index = info.get("tree_index")
+    if tree_index is not None:
+        cached = next((i for i, other in _element_info.items() if other.get("combo_parent") == tree_index), None)
+        if cached is not None:
+            return get_cached_element(cached, target_hwnd), _element_info.get(cached, {}), cached
+    child = _combo_edit_child(ctrl)
+    if child is None:
+        return None
+    own = int(getattr(child, "NativeWindowHandle", 0) or 0)
+    cached = next((i for i, other in _element_info.items() if own and other.get("hwnd") == own), None)
+    if cached is not None and _element_info[cached].get("type") == "Edit":
+        return get_cached_element(cached, target_hwnd), _element_info.get(cached, {}), cached
+    edit_info = {
+        "type": "Edit",
+        "name": str(getattr(child, "Name", "") or ""),
+        "hwnd": own,
+        "host_hwnd": int(info.get("host_hwnd") or 0),
+        "framework": info.get("framework"),
+        "class_name": str(getattr(child, "ClassName", "") or ""),
+    }
+    return child, edit_info, element_index
 
 
 class TargetNotFoundError(ValueError):
