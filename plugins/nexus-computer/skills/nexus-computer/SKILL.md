@@ -3,7 +3,7 @@ name: nexus-computer
 description: Drive the Windows desktop and its applications in the background (look, then act in one batch, targets by label; every answer says what to do next).
 ---
 
-# NexusWindows for Antigravity (v3.5.0)
+# NexusWindows for Antigravity (v3.5.1)
 
 **GOLDEN RULE: `look` → `act` in ONE batch with targets by label; never resend a batch without looking.**
 
@@ -21,7 +21,7 @@ Act directly, without reading the code: shared token, emergency stop, the user's
 | Answer `refused` (✗, nothing done) | `look` first; `repeat=true` only if resending is intended |
 | Answer `needs_foreground` | another target by label; otherwise `foreground=true` (real mouse/keyboard as a fallback) |
 | Answer `needs_confirmation` | local destruction: explicit order from the user → resend the step with `"confirm": true`; outward gesture (pay, send, publish, transfer): show the user the exact action described by the refusal, then, after THEIR "yes", resend with `"confirm": true` AND `"accord": "<token>"` (token from the refusal); otherwise (your own initiative) ask them first |
-| Open a document, a folder, a program, a script or a shortcut | `launch(app=...)` (opening read back; a URL: use a browser tool) |
+| Open a document, a folder, a program, a script or a shortcut | `launch(app=...)` (opening read back; a Settings page: `launch(app="ms-settings:display")`, in the background; a URL: use a browser tool) |
 | Close a window | `window(action="close", hwnd=...)` |
 
 **Always name the window** (`hwnd`): without it, everything is refused (never the front window, often Antigravity itself). A title matching several windows: refusal with the list → use the number.

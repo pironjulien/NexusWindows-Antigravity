@@ -325,3 +325,143 @@ def test_ignored_posted_shortcut_is_unknown_and_points_to_the_command(monkeypatc
         TARGET, "ctrl+shift+s", parts, [(0x11, False), (0x10, False), (0x53, False)], None
     )
     assert out is not None and out["verified"] is True and "message" not in out
+
+
+# =============================================================================
+# 5. launch("ms-settings:display") : page des Paramètres ouverte derrière la fenêtre de Julien et relue (Antigravity
+#    passait par explorer.exe : description « protocoles refusés », ouverture jamais relue)
+# =============================================================================
+SETTINGS_FRAME = {"hwnd": 41, "title": "Paramètres", "process_name": "SystemSettings.exe", "process_id": 700}
+COLD_FRAME = {"hwnd": 42, "title": "Paramètres", "process_name": "ApplicationFrameHost.exe", "process_id": 900}
+
+
+@pytest.fixture
+def settings(monkeypatch):
+    """Paramètres simulés : premier relevé = fenêtres d'avant l'ouverture, puis les relevés de `sequence` un par un
+    (le dernier répété), ou `after` à chaque relevé ; aucun premier plan touché."""
+    state: dict = {"before": [], "after": [], "sequence": [], "calls": 0, "taken": False}
+
+    def listing(visible_only=True):
+        state["calls"] += 1
+        if state["calls"] == 1:
+            return list(state["before"])
+        if state["sequence"]:
+            return list(state["sequence"].pop(0) if len(state["sequence"]) > 1 else state["sequence"][0])
+        return list(state["after"])
+
+    monkeypatch.setattr(computer_client, "list_windows", listing)
+    monkeypatch.setattr(computer_client, "_pids_named", lambda name: {700} if name == "systemsettings.exe" else set())
+    monkeypatch.setattr(computer_client, "_core_window_titles", lambda pids: {"Paramètres"} if 700 in pids else set())
+    monkeypatch.setattr(computer_client, "_hand_back_if_taken", lambda seen, front: state["taken"])
+    monkeypatch.setattr(computer_client, "_give_back_after_open", lambda seen, front: False)
+    monkeypatch.setattr(computer_client, "OPEN_WAIT_S", 0.6)
+    monkeypatch.setattr(computer_client, "SETTINGS_SETTLE_S", 0.2)
+    return state
+
+
+def test_settings_page_opens_without_activation_and_is_read_back(settings):
+    settings["after"] = [SETTINGS_FRAME]
+    with patch("os.startfile") as start:
+        res = computer_client.open_path("ms-settings:display")
+    start.assert_called_once_with("ms-settings:display", show_cmd=computer_client.SW_SHOWNOACTIVATE)
+    assert res["verified"] is True and res["success"] is True and res["hwnd"] == 41
+    assert res["application"] == "systemsettings.exe" and "nouvelle fenêtre des Paramètres" in res["verified_by"]
+
+
+def test_cold_settings_frame_is_recognised_by_its_core_window_title(settings):
+    settings["after"] = [COLD_FRAME]
+    with patch("os.startfile"):
+        res = computer_client.open_path("ms-settings:display")
+    assert res["verified"] is True and res["hwnd"] == 42
+
+
+def test_settings_already_open_takes_the_page(settings):
+    settings["before"] = settings["after"] = [SETTINGS_FRAME]
+    with patch("os.startfile"):
+        res = computer_client.open_path("ms-settings:windowsupdate")
+    assert res["verified"] is True and "déjà ouverte" in res["verified_by"]
+
+
+def test_settings_foreground_given_back_to_the_user(settings):
+    settings["after"], settings["taken"] = [SETTINGS_FRAME], True
+    with patch("os.startfile"):
+        res = computer_client.open_path("ms-settings:display")
+    assert res["verified"] is True and res["focus_stolen_restored"] is True
+
+
+def test_no_settings_window_is_never_reported_opened(settings):
+    lookalike = {"hwnd": 43, "title": "Paramètres", "process_name": "Code.exe", "process_id": 5}  # autre appli
+    settings["after"] = [lookalike]
+    with patch("os.startfile"):
+        res = computer_client.open_path("ms-settings:display")
+    assert res["success"] is None and res["verified"] is None and "hwnd" not in res
+    assert "aucune fenêtre des Paramètres" in res["message"]
+
+
+def test_settings_window_gone_after_appearing_is_never_reported_opened(settings):
+    """Relecture de Codex : relevés [] → [cadre] → [] … rendaient success=True avec un HWND disparu."""
+    settings["sequence"] = [[], [SETTINGS_FRAME], []]
+    with patch("os.startfile"):
+        res = computer_client.open_path("ms-settings:display")
+    assert res["success"] is None and res["verified"] is None and "hwnd" not in res
+    assert "pas restée stable" in res["message"]
+
+
+def test_settings_window_appearing_too_late_to_settle_is_not_verified(settings, monkeypatch):
+    monkeypatch.setattr(computer_client, "SETTINGS_SETTLE_S", 5.0)  # stabilité jamais acquise avant l'expiration
+    settings["sequence"] = [[], [], [SETTINGS_FRAME]]
+    with patch("os.startfile"):
+        res = computer_client.open_path("ms-settings:display")
+    assert res["success"] is None and res["verified"] is None and "hwnd" not in res
+
+
+def test_settings_window_flicker_restarts_the_settle_delay(settings, monkeypatch):
+    """Disparition brève : le délai repart du retour de la fenêtre (assez de temps ensuite : vérifié)."""
+    monkeypatch.setattr(computer_client, "OPEN_WAIT_S", 1.2)
+    settings["sequence"] = [[SETTINGS_FRAME], [], [SETTINGS_FRAME]]
+    with patch("os.startfile"):
+        res = computer_client.open_path("ms-settings:display")
+    assert res["verified"] is True and res["hwnd"] == 41
+
+
+def test_settings_window_closed_while_giving_back_the_foreground_is_not_verified(settings, monkeypatch):
+    """Relue après _give_back_after_open : fermée entre-temps, ou remplacée par une autre fenêtre → non vérifiée."""
+    settings["after"] = [SETTINGS_FRAME]
+    monkeypatch.setattr(
+        computer_client, "_give_back_after_open", lambda seen, front: settings.update(after=[]) or False
+    )
+    with patch("os.startfile"):
+        assert computer_client.open_path("ms-settings:display")["verified"] is None
+    settings.update(calls=0, after=[SETTINGS_FRAME])
+    monkeypatch.setattr(
+        computer_client, "_give_back_after_open", lambda seen, front: settings.update(after=[COLD_FRAME]) or False
+    )
+    with patch("os.startfile"):
+        assert computer_client.open_path("ms-settings:display")["verified"] is None
+
+
+def test_settings_page_takes_no_arguments_and_web_addresses_stay_refused(settings):
+    with patch("os.startfile") as start:
+        with pytest.raises(PermissionError, match="programme .exe"):
+            computer_client.open_path("ms-settings:display", args="--x")
+        with pytest.raises(PermissionError, match="nexus-browser"):
+            computer_client.open_path("https://exemple.fr")
+    start.assert_not_called()
+
+
+@pytest.mark.parametrize("address", ["tel:0600000000", "mailto:a@example.com", "shell:RecycleBinFolder"])
+def test_other_addresses_keep_their_previous_opening(monkeypatch, address):
+    """Gardes inchangées : tel:, mailto:, shell:… ouverts tels quels par le shell (composeur, brouillon), jamais
+    par la voie des Paramètres ; le geste sortant (Appeler, Envoyer) reste un clic gardé par confirm et l'accord."""
+    _open(monkeypatch, [])
+    monkeypatch.setattr(computer_client, "_open_settings_page", MagicMock(side_effect=AssertionError("Paramètres")))
+    with patch("os.startfile") as start:
+        res = computer_client.open_path(address)
+    start.assert_called_once_with(address)
+    assert res["verified"] is None
+
+
+def test_launch_description_offers_settings_pages_and_refuses_only_web_addresses():
+    doc = mcp_server.launch.__doc__ or ""
+    assert "ms-settings:display" in doc and "protocols" not in doc
+    assert "http, https, ftp" in doc and "nexus-browser" in doc

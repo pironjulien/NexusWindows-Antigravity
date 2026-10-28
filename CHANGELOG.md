@@ -9,6 +9,15 @@ MCP server. Versions up to 2.5.0 were published here under the name "Antigravity
 
 ## [Unreleased]
 
+## [3.5.1] - 2026-10-28
+
+### Fixed
+- `launch` / `computer_open_path`: a Settings address (`ms-settings:display`…) now opens that Settings page behind the
+  user's window and is read back once a Settings window stayed present 1.6 s (new or already open), foreground given
+  back if Windows hands it to Settings; a window that closes or is replaced is never reported open. It used to open in
+  the foreground, unverified, and the tool description wrongly said protocols were refused. Other addresses (`tel:`,
+  `mailto:`, `shell:`…) open as before; web addresses stay refused (nexus-browser).
+
 ## [3.5.0] - 2026-10-28
 
 ### Added

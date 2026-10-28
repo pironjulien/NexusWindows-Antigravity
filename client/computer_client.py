@@ -2136,22 +2136,146 @@ def _give_back_after_open(seen: dict[str, Any] | None, front_before: int) -> boo
     SetForegroundWindow seul est refusé à un processus d'arrière-plan (banc du 24/10 : 460 ms, jamais rendu)."""
     if not seen or not front_before:
         return _restore_if_stolen(front_before)
-    top = win32_controls.root_of(int(seen["hwnd"])) or int(seen["hwnd"])
     stolen = False
     deadline = time.monotonic() + OPEN_GIVE_BACK_S
     while time.monotonic() < deadline:
-        fg = int(user32.GetForegroundWindow() or 0)
-        if fg and fg != front_before and win32_controls.root_of(fg) == top and not _other_agent_holds_token():
-            stolen = True
-            if not _hand_back(top, front_before):
-                restore_foreground(front_before)
+        stolen = _hand_back_if_taken(seen, front_before) or stolen
         time.sleep(0.02)
     return _restore_if_stolen(front_before) or stolen
+
+
+def _hand_back_if_taken(seen: dict[str, Any], front_before: int) -> bool:
+    """Si la fenêtre ouverte (ou une des siennes) tient le premier plan pris à Julien, elle le lui rend sur-le-champ
+    (_hand_back, sinon restore_foreground). Vrai si elle le tenait."""
+    top = win32_controls.root_of(int(seen["hwnd"])) or int(seen["hwnd"])
+    fg = int(user32.GetForegroundWindow() or 0)
+    if not fg or fg == front_before or win32_controls.root_of(fg) != top or _other_agent_holds_token():
+        return False
+    if not _hand_back(top, front_before):
+        restore_foreground(front_before)
+    return True
 
 
 def _is_protocol(path: str) -> bool:
     """Protocole d'activation Windows (ms-settings:, shell:, calculator:…), pas une lettre de lecteur ni une URL web."""
     return bool(re.match(r"^[a-z][a-z0-9+.-]+:(?![\\/])", path, re.IGNORECASE)) and "://" not in path
+
+
+# Page des Paramètres (ms-settings:display…) : Windows les active et les montre d'eux-mêmes, cadre UWP au premier plan
+# 1 à 2 s après la CoreWindow (relevé de NexusWindows pour Claude, 20/10). Passe 2 du 28/10 : ouverte par os.startfile
+# (affichage normal) puis cherchée comme un document, elle n'était jamais relue (titre « Paramètres », pas « ms-settings:
+# display ») ; Antigravity, lisant « protocoles refusés » dans la description de launch, passait par explorer.exe.
+SETTINGS_PROCESS = "systemsettings.exe"
+SETTINGS_SETTLE_S = 1.6  # fenêtre des Paramètres stable depuis ce délai : le cadre affiché a remplacé la CoreWindow
+
+
+def _is_settings_page(path: str) -> bool:
+    return _is_protocol(path) and path.lower().startswith("ms-settings:")
+
+
+def _pids_named(exe_name: str) -> set[int]:
+    """Processus dont l'exécutable porte ce nom (instantané Toolhelp, sans casse)."""
+    k32 = ctypes.windll.kernel32
+    k32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    k32.Process32FirstW.argtypes = k32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+    found: set[int] = set()
+    snap = k32.CreateToolhelp32Snapshot(0x2, 0)  # TH32CS_SNAPPROCESS
+    if not snap or snap == wintypes.HANDLE(-1).value:
+        return found
+    try:
+        entry = PROCESSENTRY32W()
+        entry.dwSize = ctypes.sizeof(entry)
+        ok = k32.Process32FirstW(snap, ctypes.byref(entry))
+        while ok:
+            if entry.szExeFile.lower() == exe_name.lower():
+                found.add(int(entry.th32ProcessID))
+            ok = k32.Process32NextW(snap, ctypes.byref(entry))
+    finally:
+        k32.CloseHandle(snap)
+    return found
+
+
+def _settings_window(windows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Fenêtre affichée des Paramètres : cadre dont l'application est SystemSettings.exe (CoreWindow enfant), ou cadre
+    titré comme une CoreWindow de SystemSettings.exe (à froid, elle n'est pas encore enfant du cadre). Jamais une
+    fenêtre masquée : SystemSettings.exe survit suspendu à la fermeture des Paramètres, CoreWindow cachée comprise."""
+    pids = _pids_named(SETTINGS_PROCESS)
+    if not pids:
+        return None
+    titles = _core_window_titles(pids)
+    for w in windows:
+        name = str(w.get("process_name") or "").lower()
+        if name == SETTINGS_PROCESS or w.get("process_id") in pids:
+            return w
+        if name == "applicationframehost.exe" and str(w.get("title") or "") in titles:
+            return w
+    return None
+
+
+def _open_settings_page(page: str) -> dict[str, Any]:
+    """Page des Paramètres ouverte DERRIÈRE la fenêtre de Julien (affichage sans activation demandée), puis relue :
+    fenêtre des Paramètres, nouvelle ou déjà ouverte (Windows y charge la page), présente sans interruption pendant
+    SETTINGS_SETTLE_S puis relue (même fenêtre) après le retour du premier plan. Pendant l'attente, premier plan rendu
+    à Julien dès que les Paramètres le prennent. Fenêtre disparue, remplacée ou jamais stable : « ouverture non
+    vérifiée » (relecture de Codex du 28/10 : un HWND disparu était annoncé ouvert)."""
+    before = {w["hwnd"] for w in list_windows(visible_only=True)}
+    front_before = int(user32.GetForegroundWindow() or 0)
+    os.startfile(page, show_cmd=SW_SHOWNOACTIVATE)
+    seen: dict[str, Any] | None = None
+    found_at = 0.0
+    stable = False
+    glimpsed = False  # une fenêtre des Paramètres a été vue à un relevé, même si elle n'a pas tenu
+    stolen = False
+    deadline = time.monotonic() + OPEN_WAIT_S
+    while time.monotonic() < deadline:
+        time.sleep(0.15)
+        current = _settings_window(list_windows(visible_only=True))
+        if current is None:
+            seen = None  # fermée ou masquée : la stabilité repart de zéro
+            continue
+        glimpsed = True
+        if seen is None or current["hwnd"] != seen["hwnd"]:
+            seen, found_at = current, time.monotonic()
+        if front_before:
+            stolen = _hand_back_if_taken(seen, front_before) or stolen
+        if time.monotonic() - found_at >= SETTINGS_SETTLE_S:
+            stable = True
+            break
+    stolen = _give_back_after_open(seen, front_before) or stolen
+    if stable and seen is not None:  # relue après le retour du premier plan : présente, et la même fenêtre
+        final = _settings_window(list_windows(visible_only=True))
+        if final is None or final["hwnd"] != seen["hwnd"]:
+            seen = None
+    else:
+        seen = None
+    result: dict[str, Any] = {
+        "success": True if seen else None,
+        "verified": bool(seen) or None,
+        "path": page,
+        "application": SETTINGS_PROCESS,
+    }
+    if seen:
+        reused = seen["hwnd"] in before
+        result.update(
+            hwnd=seen["hwnd"],
+            title=seen["title"],
+            verified_by="fenêtre des Paramètres déjà ouverte, page chargée dedans"
+            if reused
+            else "nouvelle fenêtre des Paramètres relue",
+        )
+    elif glimpsed:
+        result["message"] = (
+            f"~ ouverture non vérifiée : fenêtre des Paramètres apparue mais pas restée stable en {OPEN_WAIT_S:g} s "
+            "(fermée, masquée ou remplacée) ; aucune fenêtre désignée, vérifier (windows)."
+        )
+    else:
+        result["message"] = (
+            f"~ ouverture non vérifiée : aucune fenêtre des Paramètres relue en {OPEN_WAIT_S:g} s ; aucune fenêtre "
+            "désignée, vérifier (windows)."
+        )
+    if stolen:
+        result["focus_stolen_restored"] = True
+    return result
 
 
 def _resolve_program(path: str) -> str:
@@ -2262,7 +2386,10 @@ def _args_problem(target: Path, args: str, chromium: bool) -> str:
 
 def open_path(path_or_url: str, args: str = "") -> dict[str, Any]:
     """Ouvre un chemin existant (document, dossier, programme, script, raccourci) comme un double-clic
-    (ShellExecute). Refus : URL et protocoles (pages web : nexus-browser), chemins de périphérique, chemin introuvable.
+    (ShellExecute). Refus : adresses web http, https, ftp (pages web : nexus-browser), chemins de périphérique, chemin
+    introuvable. Page des Paramètres (« ms-settings:display ») : ouverte derrière la fenêtre de Julien et relue
+    (_open_settings_page) ; autre protocole Windows (shell:, mailto:, tel:…) : ouvert tel quel par son application,
+    jamais un envoi ni un appel (le geste sortant reste un clic, gardé par confirm et l'accord dans act).
 
     Arguments d'un programme .exe : `args`, ou à la suite du chemin dans la même chaîne (« notepad.exe C:\\x.txt »,
     « "C:\\Mon dossier\\app.exe" C:\\x.txt ») ; un chemin existant avec espaces n'est jamais coupé.
@@ -2285,6 +2412,8 @@ def open_path(path_or_url: str, args: str = "") -> dict[str, Any]:
         problem = _args_problem(target, args, bool(chromium))
         if problem:
             raise PermissionError(f"Ouverture refusée de « {path_or_url} » : {problem}. Rien n'a été ouvert.")
+    if _is_settings_page(path_expanded):
+        return _open_settings_page(path_expanded)
     # Nom relu dans le titre : celui du document passé en argument s'il y en a un (onglet ajouté à une fenêtre ouverte).
     # Arguments entiers d'abord : un chemin avec espaces non mis entre guillemets reste un seul document.
     candidates = [args.strip().strip('"'), *reversed(split_command_args(args))] if args else []

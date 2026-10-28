@@ -454,7 +454,8 @@ def computer_act(
 @_register_legacy_computer_tool(ACT)
 def computer_open_path(path: str, args: str = "") -> str:
     """Ouvre un chemin existant comme un double-clic (document, dossier, programme, script, raccourci), ouverture
-    relue. Refusées : URL et protocoles (pages web : nexus-browser). args : arguments d'un programme .exe.
+    relue. Refusées : adresses web http, https, ftp (nexus-browser). Page des Paramètres (« ms-settings:display ») :
+    ouverte en arrière-plan et relue. args : arguments d'un programme .exe.
     Exemple : {"path": "C:\\\\Dev"}"""
     with busy_indicator.working():
         t0 = time.perf_counter()
@@ -481,9 +482,10 @@ def computer_close_window(hwnd: int | str) -> Any:
 @_register_common_tool("launch", ACT)
 def launch(app: str, args: str = "") -> str:
     """Open an application (name such as "notepad.exe", or path), a folder or a document, like a double-click; the
-    opening is read back. Refused: URLs and protocols (web pages: nexus-browser).
-    args: arguments of a .exe program (a file to open…), never for a document or a folder; also accepted after the
-    program in `app`, a path with spaces is never split. Chromium/Electron apps: files only, never a switch.
+    opening is read back. Settings page: app="ms-settings:display" (opened behind the user's window, read back).
+    Refused: web addresses http, https, ftp (web pages: nexus-browser). args: arguments of a .exe program (a file to
+    open…), never for a document, a folder or an address; also accepted after the program in `app`, a path with
+    spaces is never split. Chromium/Electron apps: files only, never a switch.
     Example: {"app": "notepad.exe", "args": "C:\\\\Dev\\\\notes.txt"}"""
     return computer_open_path(app, args)
 
