@@ -1,5 +1,8 @@
 # NexusWindows for Antigravity
 
+> **This repository is archived.** NexusWindows for Antigravity now lives in the single NexusWindows repository, folder [`agy/`](https://github.com/pironjulien/NexusWindows/tree/main/agy), with the common engine and the other profiles: **https://github.com/pironjulien/NexusWindows**. Install it through [NexusSystem](https://github.com/pironjulien/NexusSystem). This copy is kept read-only for earlier installs.
+
+
 <!-- mcp-name: io.github.pironjulien/nexus-windows-antigravity -->
 
 <img src="https://raw.githubusercontent.com/pironjulien/NexusWindows-Antigravity/main/plugins/nexus-windows/logo.png" alt="NexusWindows icon" width="96">
